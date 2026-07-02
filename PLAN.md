@@ -1,6 +1,6 @@
 # Sleep Tracker — Project Plan
 
-A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** development board with an external **MAX30102** pulse-oximetry sensor. The device measures heart rate, SpO2, and movement overnight, scores sleep locally, and presents results on the onboard AMOLED touch display.
+A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** development board with an external **MAX3010x** pulse-oximetry sensor (**MAX30102** for initial bring-up, transitioning to the **MAX30101**). The device measures heart rate, SpO2, and movement overnight, scores sleep locally, and presents results on the onboard AMOLED touch display.
 
 - Board wiki: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.8
 - Board docs: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8
@@ -47,26 +47,31 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** 
 | Audio | ES8311 codec + mics + speaker | I2S/I2C | Smart alarm; snore detection (stretch) |
 | Storage | 16 MB NOR flash + microSD slot | SPI/SDIO | Firmware + night logs |
 | Battery | MX1.25 header (3.7 V Li-Po) | — | Untethered overnight use |
-| Expansion | 11 solder pads: I2C, UART, USB, 5V, 3V3, GND | — | **MAX30102 attaches here** |
+| Expansion | 11 solder pads: I2C, UART, USB, 5V, 3V3, GND | — | **MAX3010x PPG sensor attaches here** |
 
 Memory note: the ESP32-S3R8 has **512 KB internal SRAM plus 8 MB PSRAM**. That headroom is why we chose it — a full 368×448 RGB565 frame buffer (~330 KB) fits comfortably *and* we can hold hours of raw PPG + accel samples in RAM before flushing to SD, making full-waveform overnight logging the default rather than a compromise. (On the C6 fallback there is no PSRAM: LVGL would need partial draw buffers and logging would drop to epoch summaries — the reason the S3 is the primary target.)
 
-### 2.2 MAX30102 integration
+### 2.2 PPG sensor integration (MAX3010x)
 
-The MAX30102 is an I2C device (address `0x57`) with red + IR LEDs and a photodiode (PPG). It shares the board's I2C bus via the expansion pads:
+The external PPG sensor is an Analog Devices **MAX3010x**-family part on the shared I2C bus (address `0x57`):
+
+- **MAX30102** — used for **initial bring-up** (red + IR LEDs, one photodiode). This is the part in hand.
+- **MAX30101** — the **planned** sensor (arriving shortly). Register-compatible sibling at the same `0x57` address, but it **adds a green LED** — the wavelength commercial wrist trackers use because it's far less motion-sensitive at the wrist — while keeping red + IR for SpO2. Coming on the TinyCircuits **AST1041** Pulse-Oximetry Wireling (see [`datasheets/`](../datasheets/)).
+
+Because they're register-compatible, one driver covers both; the transition is a hardware swap, not a firmware rewrite. Sensor upgrade options beyond the MAX3010x (MAXM86161, MAX86141) are catalogued in [`datasheets/`](../datasheets/).
 
 ```
-MAX30102 breakout      ESP32-S3-Touch-AMOLED-1.8 pads
-  VIN  ─────────────────  3V3
-  GND  ─────────────────  GND
-  SDA  ─────────────────  I2C SDA pad
-  SCL  ─────────────────  I2C SCL pad
-  INT  ─────────────────  (optional) spare GPIO — FIFO-ready interrupt
+MAX3010x breakout / AST1041 Wireling   ESP32-S3-Touch-AMOLED-1.8 pads
+  VIN / VCC  ─────────────────────────  3V3
+  GND        ─────────────────────────  GND
+  SDA        ─────────────────────────  I2C SDA pad
+  SCL        ─────────────────────────  I2C SCL pad
+  INT        ─────────────────────────  (optional) spare GPIO — FIFO-ready interrupt
 ```
 
-I2C address map (no conflicts): ES8311 `0x18`, AXP2101 `0x34`, FT3168 `0x38`, PCF85063 `0x51`, MAX30102 `0x57`, QMI8658 `0x6A/0x6B`.
+I2C address map (no conflicts): ES8311 `0x18`, AXP2101 `0x34`, FT3168 `0x38`, PCF85063 `0x51`, MAX3010x `0x57`, QMI8658 `0x6A/0x6B`.
 
-Wiring the INT line is strongly recommended: the MAX30102 has a 32-sample FIFO, and an interrupt-driven driver lets the CPU stay in light sleep between FIFO drains instead of polling.
+Wiring the INT line is strongly recommended: the MAX3010x has a 32-sample FIFO, and an interrupt-driven driver lets the CPU stay in light sleep between FIFO drains instead of polling. **On the AST1041 Wireling, confirm the 5-pin connector actually exposes INT** — if not, poll or solder to the chip's INT pad (noted in `datasheets/`).
 
 **Mechanical:** the sensor must sit flush and snug against the top of the wrist (elastic strap, light pressure, no gap — motion artifact and ambient light leakage are the #1 cause of bad PPG). Enclosure/strap design is tracked as its own work item in Phase 0.
 
@@ -77,7 +82,7 @@ Rough overnight (8 h) estimate with display off:
 | Consumer | Strategy | Est. avg current |
 |---|---|---|
 | ESP32-S3 | Light sleep between sensor windows, radio off; PSRAM self-refresh in sleep | 2–8 mA |
-| MAX30102 | Duty-cycled: ~30–60 s of PPG every 5 min, low LED current | 0.2–1 mA |
+| MAX3010x | Duty-cycled: ~30–60 s of PPG every 5 min, low LED current | 0.2–1 mA |
 | QMI8658 | Accel-only low-power mode (~50 Hz), gyro off | <0.1 mA |
 | AMOLED | Off during sleep; tilt/touch-to-wake | ~0 |
 
@@ -110,11 +115,11 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
 ## 3. Firmware Stack
 
 - **Framework: ESP-IDF 5.x** (not Arduino). We need fine-grained power management (light-sleep with I2C/GPIO wake), the I2S driver for the ES8311, native USB (mass-storage offload / CDC streaming), and FreeRTOS dual-core task control. Waveshare publishes ESP-IDF examples for this exact board that we can lift drivers from.
-- **Threading:** pin sensor acquisition (MAX30102 + QMI8658) to one core and UI/SD-logging to the other, so an LVGL redraw or a slow SD flush never drops samples — a concrete payoff of the dual-core S3.
+- **Threading:** pin sensor acquisition (MAX3010x + QMI8658) to one core and UI/SD-logging to the other, so an LVGL redraw or a slow SD flush never drops samples — a concrete payoff of the dual-core S3.
 - **UI: LVGL 9** with the `esp_lcd` SH8601 QSPI driver; full frame buffer in PSRAM (partial buffers only on the C6 fallback).
 - **Components** (each its own ESP-IDF component under `components/`):
   - `bsp/` — board support: pins, buses, display, touch, PMU, RTC bring-up (adapted from Waveshare's repo). **All board-specific pin/peripheral defs live here** so an S3→C6 swap is confined to this one component.
-  - `max30102/` — FIFO-interrupt driver, LED-current control, shutdown/wake.
+  - `max30102/` — MAX3010x PPG driver (MAX30102/30101, register-compatible): FIFO-interrupt driver, LED-current control, shutdown/wake.
   - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
   - `actigraphy/` — QMI8658 (wrist) driver config + per-epoch activity counts (band-passed accel magnitude). Wrist movement only; body position comes from `bodynet`.
   - `bodynet/` — **BLE central** managing 1..N WT9011DCL body sensors (+ the H10 reference): pairing/bonding, per-sensor role/placement, angle→sleep-position classification, per-sensor movement. Shares the BLE-central plumbing the H10 `refmon` uses.
@@ -126,7 +131,7 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
 
 ```
 QMI8658 (50 Hz accel) ─────► wrist activity counts ┐
-MAX30102 (400 Hz PPG) ──────► HR, IBIs, SpO2, SQI   ┤
+MAX3010x (400 Hz PPG) ──────► HR, IBIs, SpO2, SQI   ┤
 WT9011DCL ×N (BLE, ~1-5 Hz) ► body position + movement ┼─► 30 s epoch record ─► ring buffer ─► microSD
 PCF85063 ───────────────────► timestamps            ┘                            │
                                                                                  ▼
@@ -147,7 +152,7 @@ PCF85063 ───────────────────► timestamps
 
 HRV is a **nice-to-have, not a requirement** — we enable it only when the measured power budget (§2.3) supports the longer clean-capture windows it needs, and **nothing else in the project waits on it**. That said, HRV is the most timing-sensitive thing the device *could* measure: RMSSD is computed from the *differences* between consecutive beat intervals, so it's dominated by small errors in each beat's timestamp — errors that HR (a smoothed average over many beats) completely hides. So *if* we enable HRV, doing it well constrains several design choices:
 
-1. **Timing resolution beats raw sample rate.** RMSSD in relaxed sleep is often 20–60 ms. To resolve that we need per-beat timing error well under ~5 ms. A 200 Hz PPG stream gives only 5 ms sample spacing, so it needs sub-sample peak interpolation (parabolic/quadratic fit around the detected peak, or cross-correlation against a beat template) to recover sub-millisecond timing between samples. Sample at **200 Hz minimum, 400 Hz preferred** (MAX30102 supports it) — higher rate makes interpolation more accurate and cheaper.
+1. **Timing resolution beats raw sample rate.** RMSSD in relaxed sleep is often 20–60 ms. To resolve that we need per-beat timing error well under ~5 ms. A 200 Hz PPG stream gives only 5 ms sample spacing, so it needs sub-sample peak interpolation (parabolic/quadratic fit around the detected peak, or cross-correlation against a beat template) to recover sub-millisecond timing between samples. Sample at **200 Hz minimum, 400 Hz preferred** (the MAX3010x supports it) — higher rate makes interpolation more accurate and cheaper.
 2. **Fiducial-point consistency.** Pick one repeatable feature per beat and use it for every beat — the systolic-upstroke maximum of the first derivative is more stable against pulse-shape changes than the raw waveform peak. Consistency matters more than which point.
 3. **Beat classification is essential to HRV specifically.** Missed/extra beats and motion artifacts create huge fake IBI jumps that wreck RMSSD, so if HRV is enabled the pipeline should classify each IBI (normal / ectopic / artifact) and interpolate or exclude bad beats before any HRV math. Report the **percentage of accepted beats** alongside every HRV value — an RMSSD from a 40%-accepted window is not trustworthy and should be flagged or hidden.
 4. **HRV only from clean, still windows.** Wrist PPG HRV is only credible during motionless, high-SQI stretches. Gate HRV on: activity count near zero (IMU), SQI above threshold, and a minimum count of consecutive accepted beats (e.g. ≥2 min / ~120 beats for a stable RMSSD). Prefer quality over coverage — report HRV for the windows that qualify and leave gaps elsewhere rather than emitting noise.
@@ -181,7 +186,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 | Phase | Goal | Exit gate |
 |---|---|---|
-| **0 — Bring-up** | Get the board alive: BSP + display/LVGL up, MAX30102 on the I2C bus | Boots to an LVGL screen; all I2C devices enumerate; runs untethered |
+| **0 — Bring-up** | Get the board alive: BSP + display/LVGL up, MAX3010x on the I2C bus | Boots to an LVGL screen; all I2C devices enumerate; runs untethered |
 | *→ de-risk checks* | *Before building, run VALIDATION.md spikes S1–S5 (power, SD, coupling)* | *Power/SD/coupling hold up; S1 tells you if the optional HRV feature is feasible* |
 | **1 — Sensor drivers** | Turn raw sensors into live vitals (HR / SpO2 / movement) | Live vitals on screen; RTC + battery gauge working |
 | **2 — Recording** | Log a full night to microSD on battery (HRV capture optional, power-permitting) | Records an 8 h night; log opens cleanly |
@@ -195,14 +200,14 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 **Goal:** get the board alive and wearable — pixels on screen, every device answering, running on battery.
 - [ ] Repo scaffolding: ESP-IDF project, CI build (GitHub Actions with `espressif/idf` container), `sdkconfig.defaults`.
 - [ ] Port Waveshare BSP: display + touch + LVGL "hello world"; verify PMU, RTC, IMU over I2C, and detect the microSD card over SPI (FAT mount + crash-safe writer come in Phase 2).
-- [ ] Wire MAX30102 to the I2C pads; confirm it ACKs at `0x57` alongside the onboard devices.
+- [ ] Wire the MAX3010x PPG sensor (MAX30102 first, then MAX30101 — same `0x57` address) to the I2C pads; confirm it ACKs alongside the onboard devices.
 - [ ] First-pass strap/enclosure so the unit can actually be worn (even if crude).
 - **Exit criteria:** board boots into an LVGL screen, all I2C devices enumerate, battery charges and runs untethered.
 
 ### Phase 1 — Sensor drivers
 **Goal:** turn the raw sensors into trustworthy live vitals and a per-beat IBI series.
 - **Before building, run the de-risking spikes** in [VALIDATION.md](VALIDATION.md) §1 (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is feasible on your wrist — it does **not** gate this phase; a poor S1 just means HRV is deferred or dropped while HR/SpO2/movement proceed.
-- [ ] MAX30102 driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
+- [ ] MAX3010x driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
 - [ ] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
 - [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
 - [ ] RTC set/read; battery gauge via AXP2101.
@@ -254,7 +259,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 Engineering techniques to apply as the relevant components are built — most improve *both* data quality and power, which is why they're worth designing in early rather than bolting on:
 
 - **Motion-gated PPG (cross-sensor).** Use the IMU to blank/flag PPG during movement. Improves HRV quality (drop corrupted beats at the source) *and* saves power (skip processing corrupted windows). The single highest-leverage optimization — it ties the two core sensors together.
-- **Adaptive LED current / AGC on the MAX30102.** Auto-tune LED drive to keep the PPG in the ADC's sweet spot across skin tone and contact quality. Better SQI than a fixed current, and less power than running the LEDs hot "to be safe."
+- **Adaptive LED current / AGC on the MAX3010x.** Auto-tune LED drive to keep the PPG in the ADC's sweet spot across skin tone and contact quality. Better SQI than a fixed current, and less power than running the LEDs hot "to be safe."
 - **Template-matching beat detection.** Cross-correlate each pulse against a per-user beat template for a stable fiducial point — more robust timing than a raw peak, which directly helps RMSSD (VALIDATION.md §2).
 - **Double-buffered DMA SD writes from PSRAM.** Ping-pong ring buffers so sample acquisition never blocks on an SD flush (de-risked by spike S3).
 - **On-the-fly raw compression** (delta + RLE / simple predictive) to shrink the raw-PPG log without losing fidelity, if S3 shows SD volume/throughput is tight.
@@ -314,4 +319,4 @@ Sleep-Tracker/
 
 **Status:** the firmware scaffold is in place — valid ESP-IDF v5.x project, S3/PSRAM build config, component interfaces defined, and the dual-core task architecture wired in `app_main`. Bodies are stubbed and tagged `TODO(phaseN)`.
 
-**Next step — Phase 0 on hardware:** confirm the expansion-pad GPIOs from the Rev1.1 schematic, fill in the `bsp` pins, port the Waveshare display/touch/LVGL bring-up, and get every I2C device (including the MAX30102 at 0x57) answering.
+**Next step — Phase 0 on hardware:** confirm the expansion-pad GPIOs from the Rev1.1 schematic, fill in the `bsp` pins, port the Waveshare display/touch/LVGL bring-up, and get every I2C device (including the MAX3010x PPG sensor at 0x57) answering.

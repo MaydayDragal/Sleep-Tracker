@@ -15,13 +15,13 @@
 // ---------------------------------------------------------------------------
 
 // Shared I2C bus: AXP2101 PMU, QMI8658 IMU, PCF85063 RTC, FT3168 touch, ES8311
-// codec — and the external MAX30102 joins it on the expansion pads.
+// codec — and the external MAX3010x PPG sensor joins it on the expansion pads.
 #define BSP_I2C_PORT        0
 #define BSP_I2C_SDA_GPIO    (-1)   // TODO: from schematic
 #define BSP_I2C_SCL_GPIO    (-1)   // TODO: from schematic
 #define BSP_I2C_FREQ_HZ     400000
 
-// Known 7-bit addresses on the bus (all distinct from MAX30102 @ 0x57).
+// Known 7-bit addresses on the bus (all distinct from the MAX3010x @ 0x57).
 #define BSP_I2C_ADDR_ES8311    0x18
 #define BSP_I2C_ADDR_AXP2101   0x34
 #define BSP_I2C_ADDR_FT3168    0x38

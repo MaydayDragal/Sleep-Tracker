@@ -2,7 +2,8 @@
 #include "esp_log.h"
 
 // STUB (phase1): register map, FIFO drain, and INT handling to be implemented
-// against the confirmed MAX30102 breakout. Interfaces are stable; bodies aren't.
+// against the confirmed MAX3010x breakout (MAX30102/30101). Interfaces are
+// stable; bodies aren't.
 
 static const char *TAG = "max30102";
 

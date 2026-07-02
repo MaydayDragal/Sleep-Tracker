@@ -5,7 +5,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-// MAX30102 pulse-oximeter / PPG sensor (external, on the I2C expansion pads
+// MAX3010x pulse-oximeter / PPG sensor (MAX30102 now → MAX30101 planned;
+// register-compatible, so this driver covers both). External, on the I2C pads
 // @ 0x57). Interrupt-driven FIFO drain keeps the CPU asleep between reads.
 // See PLAN.md §2.2 and §3.3 (HRV timing — an optional, power-permitting feature).
 

@@ -1,11 +1,11 @@
 # Feature List
 
-Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED-1.8 + MAX30102). Organized by category, with a priority tier on each item:
+Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED-1.8 + MAX3010x PPG sensor). Organized by category, with a priority tier on each item:
 
 - **[P0]** core — the device isn't a sleep tracker without it (maps to Phases 0–4 in PLAN.md)
 - **[P1]** should-have — planned, but the device is useful before it lands
 - **[P2]** stretch — valuable, build when the foundation is solid
-- **[HW]** requires additional hardware beyond the board + MAX30102
+- **[HW]** requires additional hardware beyond the board + MAX3010x PPG sensor
 
 ---
 
