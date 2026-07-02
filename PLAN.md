@@ -39,7 +39,7 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** 
 | Subsystem | Part | Bus | Role in this project |
 |---|---|---|---|
 | MCU | ESP32-S3R8 (dual-core LX7 @240 MHz, Wi-Fi 4, BLE 5, **8 MB PSRAM**, 16 MB flash, native USB) | — | Everything; a core for sensing + a core for UI/logging; BLE/Wi-Fi for sync |
-| Display | 1.8" AMOLED 368×448, SH8601 | QSPI | UI, morning report |
+| Display | 1.8" AMOLED 368×448, **CO5300** (on-hardware; earlier docs said SH8601) | QSPI | UI, morning report |
 | Touch | FT3168 / FT6146 | I2C | UI input |
 | IMU | QMI8658 (6-axis accel + gyro) | I2C | Movement/actigraphy, wake-on-motion, tilt-to-wake |
 | RTC | PCF85063 (backup-battery pads) | I2C | Timekeeping across resets, epoch timestamps |
@@ -69,7 +69,7 @@ MAX3010x breakout / AST1041 Wireling   ESP32-S3-Touch-AMOLED-1.8 pads
   INT        ─────────────────────────  (optional) spare GPIO — FIFO-ready interrupt
 ```
 
-I2C address map (no conflicts): ES8311 `0x18`, AXP2101 `0x34`, FT3168 `0x38`, PCF85063 `0x51`, MAX3010x `0x57`, QMI8658 `0x6A/0x6B`.
+I2C address map (confirmed by on-board scan, Phase 0): ES8311 `0x18`, **TCA9554 `0x20`** (IO-expander, drives LCD/touch reset), AXP2101 `0x34`, FT3168 `0x38`, PCF85063 `0x51`, MAX3010x `0x57`, QMI8658 `0x6B` (SA0 high on this board).
 
 Wiring the INT line is strongly recommended: the MAX3010x has a 32-sample FIFO, and an interrupt-driven driver lets the CPU stay in light sleep between FIFO drains instead of polling. **On the AST1041 Wireling, confirm the 5-pin connector actually exposes INT** — if not, poll or solder to the chip's INT pad (noted in `datasheets/`).
 
@@ -116,9 +116,9 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
 
 - **Framework: ESP-IDF 5.x** (not Arduino). We need fine-grained power management (light-sleep with I2C/GPIO wake), the I2S driver for the ES8311, native USB (mass-storage offload / CDC streaming), and FreeRTOS dual-core task control. Waveshare publishes ESP-IDF examples for this exact board that we can lift drivers from.
 - **Threading:** pin sensor acquisition (MAX3010x + QMI8658) to one core and UI/SD-logging to the other, so an LVGL redraw or a slow SD flush never drops samples — a concrete payoff of the dual-core S3.
-- **UI: LVGL 9** with the `esp_lcd` SH8601 QSPI driver; full frame buffer in PSRAM (partial buffers only on the C6 fallback).
+- **UI: LVGL 9** with the `esp_lcd` **CO5300** QSPI driver (via the managed Waveshare BSP); full frame buffer in PSRAM (partial buffers only on the C6 fallback).
 - **Components** (each its own ESP-IDF component under `components/`):
-  - `bsp/` — board support: pins, buses, display, touch, PMU, RTC bring-up (adapted from Waveshare's repo). **All board-specific pin/peripheral defs live here** so an S3→C6 swap is confined to this one component.
+  - `board/` — board seam: **delegates** to Waveshare's managed BSP (`waveshare/esp32_s3_touch_amoled_1_8`) for display/touch/SD/PMU/expander bring-up, and re-exports a small `board_*` API. **All board-specific code is confined here** so an S3→C6 swap stays local. (Renamed from `bsp/` to cede the `bsp_` namespace to the vendor BSP.)
   - `max30102/` — MAX3010x PPG driver (MAX30102/30101, register-compatible): FIFO-interrupt driver, LED-current control, shutdown/wake.
   - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
   - `actigraphy/` — QMI8658 (wrist) driver config + per-epoch activity counts (band-passed accel magnitude). Wrist movement only; body position comes from `bodynet`.
@@ -307,7 +307,7 @@ Sleep-Tracker/
 │   ├── partitions.csv
 │   ├── main/                # app_main: dual-core task setup (sense | UI)
 │   └── components/
-│       ├── bsp/             # board pins/buses/PMU/RTC/SD — only board-specific code
+│       ├── board/           # board seam → delegates to managed Waveshare BSP (only board-specific code)
 │       ├── max30102/  ppg/  actigraphy/   # sensing + PPG/HRV pipeline
 │       ├── bodynet/         # BLE central: WT9011DCL body sensors + H10
 │       ├── sleep_core/      # epoch record, session SM, HRV, scoring
@@ -317,6 +317,6 @@ Sleep-Tracker/
 └── docs/                    # per-subsystem notes as they solidify (TODO)
 ```
 
-**Status:** the firmware scaffold is in place — valid ESP-IDF v5.x project, S3/PSRAM build config, component interfaces defined, and the dual-core task architecture wired in `app_main`. Bodies are stubbed and tagged `TODO(phaseN)`.
+**Status (Phase 0 in progress):** the firmware boots on real hardware — dual-core task architecture running, all five onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`), the CO5300 AMOLED + LVGL come up, and a screen renders. Board bring-up is delegated to Waveshare's managed BSP via `components/board/`. Sensor/DSP/UI feature bodies remain stubbed and tagged `TODO(phaseN)`.
 
-**Next step — Phase 0 on hardware:** confirm the expansion-pad GPIOs from the Rev1.1 schematic, fill in the `bsp` pins, port the Waveshare display/touch/LVGL bring-up, and get every I2C device (including the MAX3010x PPG sensor at 0x57) answering.
+**Next steps:** (1) re-enable **touch** — the managed BSP doesn't release the FT3168 reset via the TCA9554, so it's deferred (see firmware/README.md); (2) read the **RTC / IMU / AXP2101 battery** over the working I2C bus; (3) attach the MAX3010x PPG sensor at `0x57` and start the Phase 1 driver work.

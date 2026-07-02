@@ -1,8 +1,7 @@
 idf_component_register(
     SRCS "ui.c"
     INCLUDE_DIRS "include"
+    REQUIRES board
 )
-# TODO(phase0/4): add managed deps for the display + LVGL, e.g.
-#   idf.py add-dependency "lvgl/lvgl^9"
-#   idf.py add-dependency "espressif/esp_lcd_sh8601"
-# then add them to REQUIRES above. See firmware/README.md.
+# LVGL + the display/touch stack come transitively from `board`, which delegates
+# to the managed Waveshare BSP (waveshare/esp32_s3_touch_amoled_1_8).
