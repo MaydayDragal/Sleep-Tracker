@@ -1,0 +1,7 @@
+# Partition table — 16 MB flash. Night logs go to the microSD card (see bsp),
+# so on-flash "storage" is only a fallback / config store. Tune sizes as needed.
+# Name,     Type, SubType,  Offset,   Size,  Flags
+nvs,        data, nvs,      ,         24K,
+phy_init,   data, phy,      ,         4K,
+factory,    app,  factory,  ,         4M,
+storage,    data, spiffs,   ,         2M,
