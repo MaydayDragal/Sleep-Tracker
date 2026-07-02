@@ -13,6 +13,7 @@ A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](ht
 | **[`firmware/`](firmware/)** | ESP-IDF v5.x scaffold (ESP32-S3) — [build instructions](firmware/README.md) | When you start writing/flashing code |
 | **[FEATURES.md](FEATURES.md)** | Prioritized feature list (P0 core → P2 stretch → HW add-ons) | Reference — the backlog |
 | **[INTEGRATION.md](INTEGRATION.md)** | Long-term Home Assistant + CPAP integration design | Long-term reference — not needed for Phases 0–4 |
+| **[datasheets/](datasheets/)** | Datasheets for the board's main ICs + the project sensors, with the I²C bus map | Hardware reference — bring-up, wiring, driver work |
 
 ## Development stages at a glance
 
