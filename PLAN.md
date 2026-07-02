@@ -1,9 +1,12 @@
 # Sleep Tracker — Project Plan
 
-A wrist-worn sleep tracker built on the **Waveshare ESP32-C6-Touch-AMOLED-1.8** development board with an external **MAX30102** pulse-oximetry sensor. The device measures heart rate, SpO2, and movement overnight, scores sleep locally, and presents results on the onboard AMOLED touch display.
+A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** development board with an external **MAX30102** pulse-oximetry sensor. The device measures heart rate, SpO2, and movement overnight, scores sleep locally, and presents results on the onboard AMOLED touch display.
 
-- Board wiki: https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-1.8
-- Board firmware/examples: https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-1.8
+- Board wiki: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.8
+- Board docs: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8
+- Board firmware/examples: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.8
+
+> **Board choice (decided):** targeting the **ESP32-S3** variant to prioritize sample rate and full-fidelity data logging — its 8 MB PSRAM and dual-core CPU let us buffer and store raw overnight waveforms, not just epoch summaries. The pin-compatible **ESP32-C6** sibling (same display/touch/IMU/RTC/PMU/audio, but 512 KB SRAM, no PSRAM, lower power draw) is kept as a **fallback if overnight power draw proves too high**. The firmware BSP is structured to make that swap cheap (see §3).
 
 ---
 
@@ -36,7 +39,7 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-C6-Touch-AMOLED-1.8** 
 
 | Subsystem | Part | Bus | Role in this project |
 |---|---|---|---|
-| MCU | ESP32-C6 (RISC-V @160 MHz, Wi-Fi 6, BLE 5, 802.15.4) | — | Everything; BLE for sync |
+| MCU | ESP32-S3R8 (dual-core LX7 @240 MHz, Wi-Fi 4, BLE 5, **8 MB PSRAM**, 16 MB flash, native USB) | — | Everything; a core for sensing + a core for UI/logging; BLE/Wi-Fi for sync |
 | Display | 1.8" AMOLED 368×448, SH8601 | QSPI | UI, morning report |
 | Touch | FT3168 / FT6146 | I2C | UI input |
 | IMU | QMI8658 (6-axis accel + gyro) | I2C | Movement/actigraphy, wake-on-motion, tilt-to-wake |
@@ -47,14 +50,14 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-C6-Touch-AMOLED-1.8** 
 | Battery | MX1.25 header (3.7 V Li-Po) | — | Untethered overnight use |
 | Expansion | 11 solder pads: I2C, UART, USB, 5V, 3V3, GND | — | **MAX30102 attaches here** |
 
-Memory note: ESP32-C6 has **512 KB SRAM and no PSRAM**. A full 368×448 RGB565 frame buffer is ~330 KB, so LVGL must run with a partial draw buffer (e.g. 1/8–1/4 screen). This is a known constraint, not a blocker — Waveshare's own demos do this.
+Memory note: the ESP32-S3R8 has **512 KB internal SRAM plus 8 MB PSRAM**. That headroom is why we chose it — a full 368×448 RGB565 frame buffer (~330 KB) fits comfortably *and* we can hold hours of raw PPG + accel samples in RAM before flushing to SD, making full-waveform overnight logging the default rather than a compromise. (On the C6 fallback there is no PSRAM: LVGL would need partial draw buffers and logging would drop to epoch summaries — the reason the S3 is the primary target.)
 
 ### 2.2 MAX30102 integration
 
 The MAX30102 is an I2C device (address `0x57`) with red + IR LEDs and a photodiode (PPG). It shares the board's I2C bus via the expansion pads:
 
 ```
-MAX30102 breakout      ESP32-C6-Touch-AMOLED-1.8 pads
+MAX30102 breakout      ESP32-S3-Touch-AMOLED-1.8 pads
   VIN  ─────────────────  3V3
   GND  ─────────────────  GND
   SDA  ─────────────────  I2C SDA pad
@@ -74,21 +77,22 @@ Rough overnight (8 h) estimate with display off:
 
 | Consumer | Strategy | Est. avg current |
 |---|---|---|
-| ESP32-C6 | Light sleep between sensor windows, radio off | 0.5–3 mA |
+| ESP32-S3 | Light sleep between sensor windows, radio off; PSRAM self-refresh in sleep | 2–8 mA |
 | MAX30102 | Duty-cycled: ~30–60 s of PPG every 5 min, low LED current | 0.2–1 mA |
 | QMI8658 | Accel-only low-power mode (~50 Hz), gyro off | <0.1 mA |
 | AMOLED | Off during sleep; tilt/touch-to-wake | ~0 |
 
-That lands in the 1–4 mA average range → a 250 mAh cell survives a night with margin, but a **500–1000 mAh Li-Po** is the comfortable choice and is a cheap upgrade via the same MX1.25 header. Continuous (non-duty-cycled) PPG is the main thing that blows the budget; the sampling scheduler in Phase 3 is where we tune this.
+That lands roughly in the 3–10 mA average range. The S3 is thirstier than the C6 (dual-core, PSRAM self-refresh in sleep is the main adder), so a **500–1000 mAh Li-Po** is the recommended cell rather than the stock 250 mAh — both fit the same MX1.25 header. Continuous (non-duty-cycled) PPG and the nightly HRV capture windows are the biggest draws; the sampling scheduler (Phase 2) is where we trade fidelity against battery. **If overnight drain proves unacceptable even with the bigger cell, the C6 fallback is the lever** — same firmware, lower-power SoC, at the cost of raw-waveform logging.
 
 ---
 
 ## 3. Firmware Stack
 
-- **Framework: ESP-IDF 5.x** (not Arduino). We need fine-grained power management (light-sleep with I2C/GPIO wake), the I2S driver for the ES8311, and FreeRTOS task control. Waveshare publishes ESP-IDF examples for this exact board that we can lift drivers from.
-- **UI: LVGL 9** with the `esp_lcd` SH8601 QSPI driver and a partial frame buffer.
+- **Framework: ESP-IDF 5.x** (not Arduino). We need fine-grained power management (light-sleep with I2C/GPIO wake), the I2S driver for the ES8311, native USB (mass-storage offload / CDC streaming), and FreeRTOS dual-core task control. Waveshare publishes ESP-IDF examples for this exact board that we can lift drivers from.
+- **Threading:** pin sensor acquisition (MAX30102 + QMI8658) to one core and UI/SD-logging to the other, so an LVGL redraw or a slow SD flush never drops samples — a concrete payoff of the dual-core S3.
+- **UI: LVGL 9** with the `esp_lcd` SH8601 QSPI driver; full frame buffer in PSRAM (partial buffers only on the C6 fallback).
 - **Components** (each its own ESP-IDF component under `components/`):
-  - `bsp/` — board support: pins, buses, display, touch, PMU, RTC bring-up (adapted from Waveshare's repo).
+  - `bsp/` — board support: pins, buses, display, touch, PMU, RTC bring-up (adapted from Waveshare's repo). **All board-specific pin/peripheral defs live here** so an S3→C6 swap is confined to this one component.
   - `max30102/` — FIFO-interrupt driver, LED-current control, shutdown/wake.
   - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
   - `actigraphy/` — QMI8658 driver config + per-epoch activity counts (band-passed accel magnitude).
@@ -197,8 +201,9 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 | Wrist PPG is noisy (motion, contact pressure, ambient light) | SQI gating — discard bad windows rather than log garbage; strap design matters as much as code |
 | Wrist SpO2 accuracy is inherently poor | Report trends/min values, label as estimate |
 | Reliable HRV is hard on wrist PPG — timing errors dominate RMSSD | Sub-sample peak interpolation, 200–400 Hz sampling, beat-acceptance gating, HRV only from still high-SQI windows, ECG-validated (see §3.3) |
-| 512 KB SRAM with a big display + DSP + logging | Partial LVGL buffers; keep PPG processing streaming (no large FFTs needed for v1) |
-| 250 mAh battery may be tight for continuous modes | Duty-cycling by default; upgrade cell via same connector |
+| S3 draws more than the C6 → overnight battery life | 500–1000 mAh cell + duty-cycling; C6 is the documented fallback SoC if drain is still too high |
+| Memory pressure from display + DSP + raw logging | S3's 8 MB PSRAM covers it; keep PPG processing streaming and flush raw buffers to SD periodically |
+| 250 mAh stock battery too small for the S3 | Use a 500–1000 mAh cell on the same MX1.25 connector |
 | Touch controller variant differs by batch (FT3168 vs FT6146) | Probe at runtime; both are FocalTech and near-identical over I2C |
 | Which exact GPIOs the expansion I2C pads map to | Confirm from the Rev1.1 schematic in Waveshare's repo during Phase 0 |
 
@@ -209,19 +214,28 @@ Open questions to settle as we implement (defaults chosen so work can start):
 
 ---
 
-## 7. Proposed Repository Layout
+## 7. Repository Layout
 
 ```
 Sleep-Tracker/
 ├── PLAN.md                  # this document
-├── firmware/                # ESP-IDF project
-│   ├── main/
-│   ├── components/
-│   │   ├── bsp/  max30102/  ppg/  actigraphy/  sleep_core/  ui/  sync/
-│   └── sdkconfig.defaults
-├── hardware/                # wiring diagrams, strap/enclosure files
-├── tools/                   # Python log analysis / algorithm tuning
-└── docs/                    # per-subsystem notes as they solidify
+├── FEATURES.md              # prioritized feature list
+├── INTEGRATION.md           # Home Assistant + CPAP design
+├── firmware/                # ESP-IDF project (SCAFFOLDED — see firmware/README.md)
+│   ├── CMakeLists.txt
+│   ├── sdkconfig.defaults   # esp32s3 + octal PSRAM + 16 MB flash + custom partitions + PM
+│   ├── partitions.csv
+│   ├── main/                # app_main: dual-core task setup (sense | UI)
+│   └── components/
+│       ├── bsp/             # board pins/buses/PMU/RTC/SD — only board-specific code
+│       ├── max30102/  ppg/  actigraphy/   # sensing + PPG/HRV pipeline
+│       ├── sleep_core/      # epoch record, session SM, HRV, scoring
+│       └── ui/  sync/       # LVGL screens; BLE/MQTT → HA + CPAP
+├── hardware/                # wiring diagrams, strap/enclosure files (TODO)
+├── tools/                   # Python log analysis / algorithm tuning (TODO)
+└── docs/                    # per-subsystem notes as they solidify (TODO)
 ```
 
-**Next step:** Phase 0 — scaffold the ESP-IDF project and port the Waveshare BSP so we have pixels on screen and every I2C device answering.
+**Status:** the firmware scaffold is in place — valid ESP-IDF v5.x project, S3/PSRAM build config, component interfaces defined, and the dual-core task architecture wired in `app_main`. Bodies are stubbed and tagged `TODO(phaseN)`.
+
+**Next step — Phase 0 on hardware:** confirm the expansion-pad GPIOs from the Rev1.1 schematic, fill in the `bsp` pins, port the Waveshare display/touch/LVGL bring-up, and get every I2C device (including the MAX30102 at 0x57) answering.
