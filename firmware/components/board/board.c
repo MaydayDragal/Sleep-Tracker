@@ -1,6 +1,11 @@
 #include "board.h"
 #include "bsp/esp-bsp.h"   // managed Waveshare BSP (waveshare/esp32_s3_touch_amoled_1_8)
+#include "bsp/touch.h"     // bsp_touch_new()
+#include "esp_lcd_touch.h" // esp_lcd_touch_handle_t (also enables esp_lvgl_port's touch API)
 #include "esp_lvgl_port.h"
+#include "esp_io_expander.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -53,15 +58,33 @@ esp_err_t board_sdcard_mount(void)
     return bsp_sdcard_mount();
 }
 
+// The FT3168 touch and the CO5300 reset both hang off the TCA9554 IO-expander,
+// which the managed BSP creates but never drives — so the touch chip stays in
+// reset and mute at 0x38. Waveshare's own FT3168 example releases them by
+// pulsing expander pins 0/1/2 low->high before init; we replicate that here.
+static void board_release_peripheral_resets(void)
+{
+    esp_io_expander_handle_t exp = bsp_io_expander_init();   // TCA9554 @ 0x20
+    if (exp == NULL) {
+        ESP_LOGW(TAG, "IO expander init failed; LCD/touch resets not released");
+        return;
+    }
+    const uint32_t rst_pins = (1U << 0) | (1U << 1) | (1U << 2);   // EXIO0/1/2
+    esp_io_expander_set_dir(exp, rst_pins, IO_EXPANDER_OUTPUT);
+    esp_io_expander_set_level(exp, rst_pins, 0);   // assert (active-low)
+    vTaskDelay(pdMS_TO_TICKS(20));
+    esp_io_expander_set_level(exp, rst_pins, 1);   // release
+    vTaskDelay(pdMS_TO_TICKS(120));                // FT3168 boot time
+}
+
 esp_err_t board_display_start(void)
 {
-    // NOTE: we deliberately do NOT call the vendor bsp_display_start(). That path
-    // hard-asserts (ESP_ERROR_CHECK) on touch init, and BSP v2.0.3 never releases
-    // the FT3168 touch reset via the TCA9554 expander (both LCD_RST and TOUCH_RST
-    // are NC), so the touch chip stays mute at 0x38 and the whole board panics in
-    // a boot loop. The CO5300 display itself comes up fine over QSPI, so we bring
-    // up display + LVGL directly here and defer touch (Phase-0 TODO: drive the
-    // expander reset pin once its mapping is confirmed from the schematic).
+    // We bring up display + LVGL directly rather than via the vendor
+    // bsp_display_start(), which ESP_ERROR_CHECKs touch and would panic-loop if
+    // touch weren't found. First release the LCD/touch resets on the TCA9554,
+    // then bring up the CO5300 panel, LVGL, and (non-fatally) touch.
+    board_release_peripheral_resets();
+
     bsp_display_config_t disp_hw = {
         .max_transfer_sz = BSP_LCD_H_RES * BSP_LCD_V_RES * (int)sizeof(uint16_t),
     };
@@ -89,7 +112,21 @@ esp_err_t board_display_start(void)
         ESP_LOGE(TAG, "lvgl_port_add_disp failed");
         return ESP_FAIL;
     }
-    ESP_LOGW(TAG, "touch deferred (vendor BSP doesn't release FT3168 reset via TCA9554) — Phase-0 TODO");
+
+    // Touch — non-fatal. The FT3168 answers at 0x38 (FT5x06-compatible driver in
+    // the BSP) once its reset is released above. If it still doesn't probe, keep
+    // the display usable rather than aborting.
+    esp_lcd_touch_handle_t tp = NULL;
+    if (bsp_touch_new(NULL, &tp) == ESP_OK && tp != NULL) {
+        const lvgl_port_touch_cfg_t touch_cfg = { .disp = disp, .handle = tp };
+        if (lvgl_port_add_touch(&touch_cfg) != NULL) {
+            ESP_LOGI(TAG, "touch up (FT3168 @ 0x38)");
+        } else {
+            ESP_LOGW(TAG, "lvgl_port_add_touch failed");
+        }
+    } else {
+        ESP_LOGW(TAG, "touch still not found at 0x38 after expander reset");
+    }
     return ESP_OK;
 }
 

@@ -2,7 +2,7 @@
 
 ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** (+ external MAX3010x PPG sensor: MAX30102 now → MAX30101 planned).
 
-**Status (Phase 0 bring-up working):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The sensor/DSP/UI *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch is temporarily deferred — see the note under **Layout**.
+**Status (Phase 0 bring-up working):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The sensor/DSP/UI *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**).
 
 ## Build / flash / monitor
 
@@ -61,7 +61,7 @@ firmware/
     └── sync/                 # BLE GATT log-pull (P5) → MQTT to HA+CPAP [phase5/integration]
 ```
 
-> **Touch deferred (Phase-0 TODO):** the managed Waveshare BSP (v2.0.3) never releases the FT3168 touch reset via the TCA9554 IO-expander (both `LCD_RST` and `TOUCH_RST` are `NC`), so touch is mute at `0x38` and the vendor `bsp_display_start()` panics on it. `board_display_start()` therefore brings up the CO5300 display + LVGL directly (via `bsp_display_new()` + `esp_lvgl_port`) and skips touch. Re-enabling touch requires driving the correct TCA9554 reset pin — confirm its mapping from the schematic / Waveshare factory demo.
+> **Why `board/` doesn't use the vendor `bsp_display_start()`:** the managed Waveshare BSP (v2.0.3) never releases the FT3168 touch reset via the TCA9554 IO-expander (both `LCD_RST` and `TOUCH_RST` are `NC`), so touch is mute at `0x38` and the vendor `bsp_display_start()` `ESP_ERROR_CHECK`s touch init → panic loop. `board_display_start()` instead: (1) pulses TCA9554 pins `EXIO0–2` low→high to release the LCD/touch resets (matching Waveshare's own FT3168 example), (2) brings up the CO5300 + LVGL directly via `bsp_display_new()` + `esp_lvgl_port`, and (3) adds touch **non-fatally** (a probe miss degrades to display-only instead of a boot loop). Result: display **and** touch work.
 
 ## Board abstraction (S3 ↔ C6)
 

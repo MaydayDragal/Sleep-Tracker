@@ -40,6 +40,6 @@ Reference datasheets for the main ICs on the **Waveshare ESP32-S3-Touch-AMOLED-1
 
 ---
 
-**I²C bus map — confirmed by on-board scan (Phase 0, 2026-07-02):** ES8311 `0x18` · **TCA9554 `0x20`** · AXP2101 `0x34` · FT3168 `0x38` *(touch, currently held in reset — see firmware README)* · PCF85063 `0x51` · MAX30101/30102 `0x57` *(external, not yet attached)* · QMI8658 **`0x6B`**. Five devices ACK'd on the running board (`0x18/0x20/0x34/0x51/0x6B`); the display is a **CO5300** over QSPI (the SH8601 named elsewhere in these docs is superseded on this board revision).
+**I²C bus map — confirmed by on-board scan (Phase 0, 2026-07-02):** ES8311 `0x18` · **TCA9554 `0x20`** · AXP2101 `0x34` · FT3168 `0x38` *(touch — released via TCA9554 pins EXIO0–2 at display start)* · PCF85063 `0x51` · MAX30101/30102 `0x57` *(external, not yet attached)* · QMI8658 **`0x6B`**. The boot-time scan runs before the touch reset, so it shows five devices (`0x18/0x20/0x34/0x51/0x6B`); the FT3168 joins at `0x38` once `board_display_start()` pulses the expander reset. The display is a **CO5300** over QSPI (the SH8601 named elsewhere in these docs is superseded on this board revision).
 
 **Note on the AST1041 (MAX30101 Wireling):** confirm from its pinout whether the 5-pin Wireling connector breaks out the MAX30101 **INT** line — the firmware wants it for interrupt-driven FIFO reads (a power win). If not exposed, poll or solder to the chip's INT pad.

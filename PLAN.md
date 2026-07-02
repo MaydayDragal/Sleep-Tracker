@@ -317,6 +317,6 @@ Sleep-Tracker/
 └── docs/                    # per-subsystem notes as they solidify (TODO)
 ```
 
-**Status (Phase 0 in progress):** the firmware boots on real hardware — dual-core task architecture running, all five onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`), the CO5300 AMOLED + LVGL come up, and a screen renders. Board bring-up is delegated to Waveshare's managed BSP via `components/board/`. Sensor/DSP/UI feature bodies remain stubbed and tagged `TODO(phaseN)`.
+**Status (Phase 0 essentially done):** the firmware boots on real hardware — dual-core task architecture running, all onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`, plus the FT3168 touch at `0x38` once its reset is released), the CO5300 AMOLED + LVGL come up, and **touch works** (verified with an on-screen tap counter). Board bring-up is delegated to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets on the TCA9554 (a gap in the vendor BSP). Sensor/DSP/UI feature bodies remain stubbed and tagged `TODO(phaseN)`.
 
-**Next steps:** (1) re-enable **touch** — the managed BSP doesn't release the FT3168 reset via the TCA9554, so it's deferred (see firmware/README.md); (2) read the **RTC / IMU / AXP2101 battery** over the working I2C bus; (3) attach the MAX3010x PPG sensor at `0x57` and start the Phase 1 driver work.
+**Next steps:** (1) read the **RTC / IMU / AXP2101 battery** over the working I2C bus; (2) attach the MAX3010x PPG sensor at `0x57` and start the Phase 1 driver work.
