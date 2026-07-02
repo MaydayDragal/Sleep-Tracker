@@ -206,12 +206,12 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - [ ] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
 - [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
 - [ ] RTC set/read; battery gauge via AXP2101.
-- [ ] Beat detection with sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %.
+- [ ] (Optional, if pursuing HRV) Sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %. (Basic beat detection for HR is already covered above; this is the HRV-grade precision.)
 - [ ] (Optional, if pursuing HRV) Dev-only `refmon` component: subscribe to the Polar H10 RR intervals over BLE and show them next to the wrist RMSSD, timestamped by one device clock (VALIDATION.md §3) — a live reference for tuning HRV. It also stands up the BLE-central plumbing that `bodynet` reuses in Phase 2.5.
 - **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, and movement level. (If HRV is being pursued, a live RMSSD tracking the H10 in a still 2-min window is a nice bonus check — not required to pass this phase.)
 
 ### Phase 2 — Recording pipeline
-**Goal:** record a full night to microSD on battery, including a nightly HRV capture mode.
+**Goal:** record a full night to microSD on battery (with an optional, power-permitting nightly HRV capture mode).
 - [ ] Epoch assembler + ring buffer + SD writer (append-only, crash-safe).
 - [ ] Night session state machine (manual start/stop first; auto-detect later).
 - [ ] Power work: display off, light sleep between sensor windows, duty-cycle scheduler. Measure real overnight battery drain.
