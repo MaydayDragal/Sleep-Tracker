@@ -27,7 +27,8 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P0] Resting heart rate** — nightly RHR, the single most useful trend number
 - **[P0] SpO2 monitoring** — per-epoch estimate, nightly min/mean
 - **[P0] Signal-quality index** — every biometric tagged with confidence; bad windows discarded, not logged as fact
-- **[P1] HRV** — RMSSD/SDNN per epoch and nightly average (recovery/strain trend)
+- **[P0] HRV (core goal)** — reliable beat-to-beat IBI capture → RMSSD/SDNN/pNN50 per clean window and nightly average; sub-sample peak timing, beat-acceptance gating, ECG-validated. See PLAN.md §3.3
+- **[P2] Frequency-domain HRV** — LF/HF from ~5-min clean windows (needs longer continuous captures)
 - **[P1] SpO2 desaturation events** — count and duration of dips below a threshold (informational, not diagnostic)
 - **[P1] Respiratory rate** — breaths/min derived from PPG baseline modulation
 - **[P2] Live vitals screen** — real-time HR/SpO2/waveform view (doubles as a sensor-placement checker)

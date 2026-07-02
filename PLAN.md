@@ -11,6 +11,7 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-C6-Touch-AMOLED-1.8** 
 
 **Core (v1):**
 - Continuous overnight recording of heart rate (HR), blood-oxygen (SpO2), and wrist movement (actigraphy).
+- **Reliable HRV measurement** — beat-to-beat interval (IBI) capture accurate enough for trustworthy RMSSD/SDNN, validated against an ECG chest strap. This is a first-class goal and drives the PPG sampling design (see §3.3).
 - On-device sleep/wake detection and basic sleep staging (awake / light / deep / REM-estimate) in 30-second epochs.
 - Morning summary on the AMOLED display: total sleep time, sleep efficiency, hypnogram, resting HR, min SpO2.
 - Data logged to microSD so nights are never lost and can be analyzed offline.
@@ -18,7 +19,7 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-C6-Touch-AMOLED-1.8** 
 **Stretch (v2+):**
 - Smart alarm — wake the user during a light-sleep window before the set alarm time (ES8311 speaker).
 - BLE sync to a phone/PC companion app; optional Wi-Fi upload.
-- HRV trends (RMSSD), respiratory-rate estimation from the PPG waveform.
+- Frequency-domain HRV (LF/HF), respiratory-rate estimation from the PPG waveform.
 - Snore/ambient-noise detection using the onboard microphones.
 
 **Non-goals:** medical-grade accuracy. Wrist SpO2 and consumer sleep staging are estimates; this is a personal-wellness/hobby device.
@@ -85,7 +86,7 @@ That lands in the 1–4 mA average range → a 250 mAh cell survives a night wit
 - **Components** (each its own ESP-IDF component under `components/`):
   - `bsp/` — board support: pins, buses, display, touch, PMU, RTC bring-up (adapted from Waveshare's repo).
   - `max30102/` — FIFO-interrupt driver, LED-current control, shutdown/wake.
-  - `ppg/` — signal processing: DC removal, band-pass, beat detection → HR + inter-beat intervals (IBIs); ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
+  - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
   - `actigraphy/` — QMI8658 driver config + per-epoch activity counts (band-passed accel magnitude).
   - `sleep_core/` — epoch assembler, storage writer, sleep-scoring algorithm, night session state machine.
   - `ui/` — LVGL screens.
@@ -95,7 +96,7 @@ That lands in the 1–4 mA average range → a 250 mAh cell survives a night wit
 
 ```
 QMI8658 (50 Hz accel) ──► activity counts ┐
-MAX30102 (50–100 Hz PPG) ─► HR, IBIs, SpO2, SQI ┼──► 30 s epoch record ──► ring buffer ──► microSD (CSV/binary)
+MAX30102 (200 Hz PPG) ───► HR, IBIs, SpO2, SQI ┼──► 30 s epoch record ──► ring buffer ──► microSD (CS
 PCF85063 ────────────────► timestamps      ┘                                 │
                                                                              ▼
                                                               sleep scorer (on epoch close +
@@ -110,6 +111,20 @@ PCF85063 ────────────────► timestamps      ┘
 2. **Stage refinement with cardiac data:** within sleep, use HR drop below nightly baseline + low variability → deep; elevated HR variability/irregularity with near-zero movement → REM-estimate; otherwise light. Applied as a full-night smoothing pass in the morning (avoids committing to noisy real-time calls).
 3. **SpO2** is reported as min/mean and a "dips below 90%" count — informational, not used for staging.
 4. Because raw-ish data lands on the SD card, the algorithm can be re-tuned offline against the recorded nights (and optionally against a reference device) without reflashing mid-project.
+
+### 3.3 Reliable HRV — requirements
+
+HRV is the most timing-sensitive thing this device measures. RMSSD is computed from the *differences* between consecutive beat intervals, so it is dominated by small errors in each beat's timestamp — errors that HR (a smoothed average over many beats) completely hides. Getting it right constrains several design choices:
+
+1. **Timing resolution beats raw sample rate.** RMSSD in relaxed sleep is often 20–60 ms. To resolve that we need per-beat timing error well under ~5 ms. A 200 Hz PPG stream gives only 5 ms sample spacing, so we **must** do sub-sample peak interpolation (parabolic/quadratic fit around the detected peak, or cross-correlation against a beat template) to recover sub-millisecond timing between samples. Sample at **200 Hz minimum, 400 Hz preferred** (MAX30102 supports it) — higher rate makes interpolation more accurate and cheaper.
+2. **Fiducial-point consistency.** Pick one repeatable feature per beat and use it for every beat — the systolic-upstroke maximum of the first derivative is more stable against pulse-shape changes than the raw waveform peak. Consistency matters more than which point.
+3. **Beat classification is mandatory, not optional.** Missed/extra beats and motion artifacts create huge fake IBI jumps that wreck RMSSD. The pipeline must classify each IBI (normal / ectopic / artifact) and either interpolate or exclude bad beats before any HRV math. Report the **percentage of accepted beats** alongside every HRV value — an RMSSD from a 40%-accepted window is not trustworthy and must be flagged.
+4. **HRV only from clean, still windows.** Wrist PPG HRV is only credible during motionless, high-SQI stretches. Gate HRV on: activity count near zero (IMU), SQI above threshold, and a minimum count of consecutive accepted beats (e.g. ≥2 min / ~120 beats for a stable RMSSD). Prefer quality over coverage — report HRV for the windows that qualify and leave gaps elsewhere rather than emitting noise.
+5. **Store the IBI series, not just the summary.** Log the full accepted-IBI list (or the raw PPG) to SD so RMSSD/SDNN/pNN50 and frequency-domain metrics (LF/HF, needs ~5 min windows) can be recomputed and re-tuned offline. The S3's PSRAM makes keeping the raw stream the default.
+6. **Duty-cycling vs. HRV is a real tension.** Short 30–60 s PPG bursts save power but may not contain a long enough clean run for a stable RMSSD. Resolution: run a **nightly HRV mode** that captures longer continuous windows during deep/stable sleep (e.g. a 5-min clean capture per sleep cycle) rather than relying on the short duty-cycle bursts. The sampling scheduler (Phase 2) exposes this as a configurable trade-off.
+7. **Validate against ground truth.** HRV is the one metric where "looks plausible" isn't enough. Validate the IBI series against an ECG chest strap (e.g. Polar H10, which exposes RR intervals over BLE) on the same wrist/session, and require Bland-Altman agreement on RMSSD before declaring HRV "reliable." This is a Phase 3 exit criterion.
+
+**Reported HRV metrics:** RMSSD (primary, robust for overnight), SDNN, pNN50, mean IBI, and per-value beat-acceptance % + coverage. Frequency-domain LF/HF is a P2 stretch (needs the longer clean windows from item 6).
 
 ---
 
@@ -143,19 +158,22 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - [ ] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
 - [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
 - [ ] RTC set/read; battery gauge via AXP2101.
-- **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, and movement level.
+- [ ] Beat detection with sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %.
+- **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, movement level, and a live RMSSD that tracks a reference during a still 2-min window.
 
 ### Phase 2 — Recording pipeline
 - [ ] Epoch assembler + ring buffer + SD writer (append-only, crash-safe).
 - [ ] Night session state machine (manual start/stop first; auto-detect later).
 - [ ] Power work: display off, light sleep between sensor windows, duty-cycle scheduler. Measure real overnight battery drain.
-- **Exit criteria:** device records a full 8-hour night on battery and the log opens cleanly in a notebook/spreadsheet.
+- [ ] Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of relying on short duty-cycle bursts. Log the full accepted-IBI series to SD.
+- **Exit criteria:** device records a full 8-hour night on battery, the log opens cleanly in a notebook/spreadsheet, and the IBI series is complete enough to compute per-cycle RMSSD.
 
 ### Phase 3 — Sleep scoring
 - [ ] Actigraphy sleep/wake classifier; tune on recorded nights.
 - [ ] Morning re-pass: stage refinement from HR/HRV, summary metrics, sleep score.
 - [ ] Offline analysis scripts (`tools/`, Python) to visualize logs and iterate on parameters.
-- **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker.
+- [ ] **HRV validation against ECG ground truth** — record simultaneous sessions vs. a Polar H10 (or equivalent RR-interval reference), compare RMSSD/SDNN with Bland-Altman analysis, and tune the beat detector/artifact filter until agreement is acceptable.
+- **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, **and** overnight RMSSD agrees with the ECG reference within a documented tolerance on clean windows.
 
 ### Phase 4 — UI polish
 - [ ] Watch face, morning report with hypnogram + HR/SpO2 charts, settings, history of last 7 nights.
@@ -174,6 +192,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 |---|---|
 | Wrist PPG is noisy (motion, contact pressure, ambient light) | SQI gating — discard bad windows rather than log garbage; strap design matters as much as code |
 | Wrist SpO2 accuracy is inherently poor | Report trends/min values, label as estimate |
+| Reliable HRV is hard on wrist PPG — timing errors dominate RMSSD | Sub-sample peak interpolation, 200–400 Hz sampling, beat-acceptance gating, HRV only from still high-SQI windows, ECG-validated (see §3.3) |
 | 512 KB SRAM with a big display + DSP + logging | Partial LVGL buffers; keep PPG processing streaming (no large FFTs needed for v1) |
 | 250 mAh battery may be tight for continuous modes | Duty-cycling by default; upgrade cell via same connector |
 | Touch controller variant differs by batch (FT3168 vs FT6146) | Probe at runtime; both are FocalTech and near-identical over I2C |
