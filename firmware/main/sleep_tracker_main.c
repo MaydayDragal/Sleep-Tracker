@@ -9,7 +9,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 
-#include "bsp.h"
+#include "board.h"
 #include "max30102.h"
 #include "ppg.h"
 #include "actigraphy.h"
@@ -24,7 +24,7 @@ static const char *TAG = "main";
 static void sensor_task(void *arg)
 {
     i2c_master_bus_handle_t bus;
-    ESP_ERROR_CHECK(bsp_i2c_get_bus(&bus));
+    ESP_ERROR_CHECK(board_i2c_get_bus(&bus));
 
     // 400 Hz PPG gives headroom for the optional HRV feature (PLAN.md §3.3); HR/SpO2 need less.
     const max30102_config_t ppg_cfg = {
@@ -63,10 +63,15 @@ static void ui_task(void *arg)
 
 void app_main(void)
 {
+    // Phase-0 bring-up aid: give a freshly-attached serial monitor time to
+    // connect before the one-shot boot banner + I2C scan print. Remove once
+    // board bring-up is done.
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
     ESP_LOGI(TAG, "Sleep Tracker booting (Waveshare ESP32-S3-Touch-AMOLED-1.8)");
 
-    ESP_ERROR_CHECK(bsp_init());         // PMU rails, clocks, shared I2C bus
-    bsp_sdcard_mount("/sdcard");         // night logs (TODO: wire in bsp)
+    ESP_ERROR_CHECK(board_init());       // shared I2C bus + enumeration scan
+    board_sdcard_mount();                // night logs (no-op-safe if no card)
     bodynet_init();                      // BLE central for WT9011DCL body sensors + H10
     sync_init();                         // BLE/MQTT — stretch, no-op for now
 

@@ -25,12 +25,23 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 # --- CPU ---
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
+# --- Compiler ---
+# Build at -Os (size). Also a deliberate workaround: GCC 14.2 (IDF 5.4) hits an
+# internal-compiler-error (segfault in the IRA pass) compiling ESP-IDF's own
+# esp_lcd/rgb/esp_lcd_panel_rgb.c at the default -Og. -Os avoids it, and smaller
+# code is the right default for a battery wearable anyway.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
 # --- Power management (light sleep between sensor windows — PLAN.md §2.3) ---
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 
 # --- FreeRTOS ---
 CONFIG_FREERTOS_HZ=1000
+
+# --- Console over the S3 native USB-Serial/JTAG (the board's USB-C, COM6) ---
+# so app logs / idf_monitor work over the single USB cable without a UART bridge.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # --- Logging ---
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

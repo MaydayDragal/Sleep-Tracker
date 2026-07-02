@@ -1,0 +1,4 @@
+# Managed dependency for the board seam. The component manager fetches this from
+# the Espressif Component Registry on `idf.py reconfigure` / `pio run`.
+dependencies:
+  waveshare/esp32_s3_touch_amoled_1_8: "^2.0.3"
