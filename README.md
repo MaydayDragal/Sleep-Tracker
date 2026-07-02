@@ -5,3 +5,5 @@ A wrist-worn sleep tracker built on the [Waveshare ESP32-C6-Touch-AMOLED-1.8](ht
 See **[PLAN.md](PLAN.md)** for the full project plan: hardware architecture, firmware stack, sleep-scoring approach, power budget, and phased milestones.
 
 See **[FEATURES.md](FEATURES.md)** for the prioritized feature list (P0 core → P2 stretch → hardware add-ons).
+
+See **[INTEGRATION.md](INTEGRATION.md)** for the long-term Home Assistant + CPAP integration design — publishing sleep data to HA over MQTT and showing a combined wrist + CPAP night summary on the display.

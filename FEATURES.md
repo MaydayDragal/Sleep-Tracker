@@ -83,6 +83,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P2] EDF export** — the sleep-research standard format; opens nights in real polysomnography tooling
 - **[P2] Wi-Fi upload** — push nights to a self-hosted dashboard (Home Assistant / InfluxDB + Grafana)
 - **[P2] NTP / BLE time sync** — RTC drift correction
+- *Home Assistant + CPAP integration has its own section — see §11.*
 
 ## 8. Insights & Trends (needs multi-night history)
 
@@ -108,6 +109,17 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P2] Privacy stance as a feature** — everything processed and stored locally; nothing leaves the device unless the user explicitly syncs
 - **[P2] Multi-profile support** — probably overkill for a wrist-worn personal device, listed for completeness
 
+## 11. Home Assistant & CPAP Ecosystem (long-term, v3+) — full design in [INTEGRATION.md](INTEGRATION.md)
+
+- **[P2] MQTT publish + HA auto-discovery** — nightly sleep/HR/HRV/SpO2 summary appears automatically as Home Assistant sensors (history, dashboards, alerts for free)
+- **[P2] Combined night summary on the wrist** — the headline: pull CPAP therapy data (AHI, mask leak, pressure, usage) back from HA and render it alongside device metrics on the AMOLED
+- **[P2] Remote config from HA** — set alarm, thresholds, brightness from a phone/dashboard; publish live HR while awake
+- **[P2] OTA over Wi-Fi via HA** — ties into §10 OTA
+- **[P2] Positional-apnea detection** — cross wrist IMU sleep position with CPAP event timestamps ("AHI 4× higher on your back") — neither device can do this alone
+- **[P2] Second-sensor efficacy check** — overlay CPAP residual-event times on wrist SpO2/HR traces to see if therapy is fully controlling events
+- **[P2] Therapy → recovery trends** — HRV / deep-sleep / RHR vs. nightly AHI and CPAP usage over weeks
+- **[P2] Mask-off / compliance automations** — "asleep but mask off" nudges, usage streaks, bedtime reminders (HA-side)
+
 ---
 
 ## Suggested build order (cross-reference PLAN.md phases)
@@ -117,4 +129,5 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 | P0 | Sections 1, 2, 3, 7 cores + basic alarm, watch face, morning report, power/battery basics | Phases 0–4 |
 | P1 | Auto sleep detection, HRV, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
 | P2 | Audio features, insights/correlations, BLE/Wi-Fi sync, EDF, AOD | Phase 5+ |
+| Integration (§11) | HA/MQTT uplink → CPAP downlink → combined summary → cross-device insights | Phase 6 / v3+ (see INTEGRATION.md §7) |
 | HW | Vibration motor, room climate sensor, lux sensor | Whenever the soldering iron is warm |

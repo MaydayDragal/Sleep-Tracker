@@ -22,7 +22,11 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-C6-Touch-AMOLED-1.8** 
 - Frequency-domain HRV (LF/HF), respiratory-rate estimation from the PPG waveform.
 - Snore/ambient-noise detection using the onboard microphones.
 
-**Non-goals:** medical-grade accuracy. Wrist SpO2 and consumer sleep staging are estimates; this is a personal-wellness/hobby device.
+**Long-term (v3+): Home Assistant + CPAP integration.**
+- Publish nightly sleep/HR/HRV/SpO2 data to Home Assistant over MQTT (with auto-discovery), and pull the user's CPAP therapy data (AHI, mask leak, pressure, usage) back so the wrist shows a **combined night summary — device metrics plus CPAP data — on the AMOLED**.
+- Unlocks cross-device insights neither device can produce alone (e.g. positional-apnea detection from wrist IMU + CPAP events). Full design in **[INTEGRATION.md](INTEGRATION.md)**.
+
+**Non-goals:** medical-grade accuracy. Wrist SpO2 and consumer sleep staging are estimates; this is a personal-wellness/hobby device. (CPAP data is surfaced for personal insight/automation, not clinical diagnosis.)
 
 ---
 
