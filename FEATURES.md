@@ -121,6 +121,17 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P2] Therapy → recovery trends** — HRV / deep-sleep / RHR vs. nightly AHI and CPAP usage over weeks
 - **[P2] Mask-off / compliance automations** — "asleep but mask off" nudges, usage streaks, bedtime reminders (HA-side)
 
+## 12. Round-2 additions (post-hardware, H10-enabled)
+
+New ideas unlocked now that the board + H10 are in hand — several lean on the H10 as an on-device reference (see [VALIDATION.md](VALIDATION.md)):
+
+- **[P1] Calibration / reference mode** — pair with the H10 on demand to record simultaneous wrist+ECG beats and auto-fit a **personal PPG→HRV correction**; also the live tuning tool for strap fit and LED current
+- **[P1] Per-night data-quality grade** — surface the SQI/beat-acceptance stats as a simple "signal quality" badge so you know how much to trust a night's HRV, not just the number
+- **[P2] Morning spot-HRV check** — a 1-minute awake seated reading (Elite HRV style) using the same pipeline; fast daily recovery signal independent of sleep staging
+- **[P2] Readiness / recovery score** — overnight HRV + resting-HR trend vs. personal baseline into a single morning "recovery" number (WHOOP-style)
+- **[P2] Live HRV biofeedback wind-down** — pre-sleep paced-breathing coach driven by real-time RMSSD on the AMOLED, to lower arousal before tracking starts
+- **[P2] Opportunistic H10 fusion** — if the H10 happens to be worn (e.g. a workout), ingest its RR to enrich daytime HRV data with gold-standard beats
+
 ---
 
 ## Suggested build order (cross-reference PLAN.md phases)

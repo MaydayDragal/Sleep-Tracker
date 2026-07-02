@@ -8,4 +8,6 @@ See **[FEATURES.md](FEATURES.md)** for the prioritized feature list (P0 core →
 
 See **[INTEGRATION.md](INTEGRATION.md)** for the long-term Home Assistant + CPAP integration design — publishing sleep data to HA over MQTT and showing a combined wrist + CPAP night summary on the display.
 
+See **[VALIDATION.md](VALIDATION.md)** for the de-risking spikes and the Polar H10 HRV-validation protocol — the recommended first work now that the hardware is in hand.
+
 The firmware scaffold lives in **[`firmware/`](firmware/)** (ESP-IDF v5.x, ESP32-S3) — see [firmware/README.md](firmware/README.md) for build instructions and current status.

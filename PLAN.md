@@ -180,7 +180,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - [ ] Actigraphy sleep/wake classifier; tune on recorded nights.
 - [ ] Morning re-pass: stage refinement from HR/HRV, summary metrics, sleep score.
 - [ ] Offline analysis scripts (`tools/`, Python) to visualize logs and iterate on parameters.
-- [ ] **HRV validation against ECG ground truth** — record simultaneous sessions vs. a Polar H10 (or equivalent RR-interval reference), compare RMSSD/SDNN with Bland-Altman analysis, and tune the beat detector/artifact filter until agreement is acceptable.
+- [ ] **HRV validation against ECG ground truth** — record simultaneous sessions vs. a Polar H10 (or equivalent RR-interval reference), compare RMSSD/SDNN with Bland-Altman analysis, and tune the beat detector/artifact filter until agreement is acceptable. **Full protocol in [VALIDATION.md](VALIDATION.md).**
 - **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, **and** overnight RMSSD agrees with the ECG reference within a documented tolerance on clean windows.
 
 ### Phase 4 — UI polish
@@ -191,6 +191,19 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - [ ] Smart alarm (light-sleep window + ES8311 speaker tones).
 - [ ] BLE GATT sync + simple companion (Web Bluetooth page or Python script) to pull logs.
 - [ ] Respiratory rate from PPG; snore detection from mics; Wi-Fi upload/dashboard.
+
+### 5.1 Optimizations & techniques to bank
+
+Engineering techniques to apply as the relevant components are built — most improve *both* data quality and power, which is why they're worth designing in early rather than bolting on:
+
+- **Motion-gated PPG (cross-sensor).** Use the IMU to blank/flag PPG during movement. Improves HRV quality (drop corrupted beats at the source) *and* saves power (skip processing corrupted windows). The single highest-leverage optimization — it ties the two core sensors together.
+- **Adaptive LED current / AGC on the MAX30102.** Auto-tune LED drive to keep the PPG in the ADC's sweet spot across skin tone and contact quality. Better SQI than a fixed current, and less power than running the LEDs hot "to be safe."
+- **Template-matching beat detection.** Cross-correlate each pulse against a per-user beat template for a stable fiducial point — more robust timing than a raw peak, which directly helps RMSSD (VALIDATION.md §2).
+- **Double-buffered DMA SD writes from PSRAM.** Ping-pong ring buffers so sample acquisition never blocks on an SD flush (de-risked by spike S3).
+- **On-the-fly raw compression** (delta + RLE / simple predictive) to shrink the raw-PPG log without losing fidelity, if S3 shows SD volume/throughput is tight.
+- **Offload motion to the QMI8658.** Use its hardware FIFO, pedometer, and wake-on-motion engine so the MCU stays asleep between events instead of polling.
+- **Compute-on-wake batching.** Keep heavy work (full-night re-scoring, radio sync) off during the night; do it in the morning on wake to protect the overnight power budget.
+- **RTC-stamped event log** for every mode/state transition — cheap, and invaluable when debugging why a night looks wrong.
 
 ---
 
