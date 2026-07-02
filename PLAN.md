@@ -14,7 +14,6 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** 
 
 **Core (v1):**
 - Continuous overnight recording of heart rate (HR), blood-oxygen (SpO2), and wrist movement (actigraphy).
-- **Reliable HRV measurement** — beat-to-beat interval (IBI) capture accurate enough for trustworthy RMSSD/SDNN, validated against an ECG chest strap. This is a first-class goal and drives the PPG sampling design (see §3.3).
 - On-device sleep/wake detection and basic sleep staging (awake / light / deep / REM-estimate) in 30-second epochs.
 - Morning summary on the AMOLED display: total sleep time, sleep efficiency, hypnogram, resting HR, min SpO2.
 - Data logged to microSD so nights are never lost and can be analyzed offline.
@@ -22,7 +21,7 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** 
 **Stretch (v2+):**
 - Smart alarm — wake the user during a light-sleep window before the set alarm time (ES8311 speaker).
 - BLE sync to a phone/PC companion app; optional Wi-Fi upload.
-- Frequency-domain HRV (LF/HF), respiratory-rate estimation from the PPG waveform.
+- **HRV (nice-to-have, power-permitting)** — the device already runs PPG for HR/SpO2, so beat-to-beat IBI capture → RMSSD/SDNN can ride on top *if the power budget supports the longer clean-capture windows it needs* (decided by the measured overnight drain, not assumed). Not a prerequisite for anything else — if it's too costly or too noisy on the wrist, we thin or drop it before touching core tracking. Frequency-domain HRV (LF/HF) and respiratory-rate estimation build on the same capture. Details in §3.3.
 - Snore/ambient-noise detection using the onboard microphones.
 
 **Long-term (v3+): Home Assistant + CPAP integration.**
@@ -82,7 +81,7 @@ Rough overnight (8 h) estimate with display off:
 | QMI8658 | Accel-only low-power mode (~50 Hz), gyro off | <0.1 mA |
 | AMOLED | Off during sleep; tilt/touch-to-wake | ~0 |
 
-That lands roughly in the 3–10 mA average range. The S3 is thirstier than the C6 (dual-core, PSRAM self-refresh in sleep is the main adder), so a **500–1000 mAh Li-Po** is the recommended cell rather than the stock 250 mAh — both fit the same MX1.25 header. Continuous (non-duty-cycled) PPG and the nightly HRV capture windows are the biggest draws; the sampling scheduler (Phase 2) is where we trade fidelity against battery. **If overnight drain proves unacceptable even with the bigger cell, the C6 fallback is the lever** — same firmware, lower-power SoC, at the cost of raw-waveform logging.
+That lands roughly in the 3–10 mA average range. The S3 is thirstier than the C6 (dual-core, PSRAM self-refresh in sleep is the main adder), so a **500–1000 mAh Li-Po** is the recommended cell rather than the stock 250 mAh — both fit the same MX1.25 header. The optional **HRV** feature is the main power-hungry add-on — it wants longer continuous clean-capture windows — so **whether we enable HRV is decided by the measured power budget** (spike S4, VALIDATION.md): if the chosen cell comfortably covers a night *with* those windows, we keep them; if not, HRV is thinned or dropped first, before core tracking is touched. The sampling scheduler (Phase 2) makes this a configurable trade-off. **If overnight drain proves unacceptable even with the bigger cell, the C6 fallback is the lever** — same firmware, lower-power SoC, at the cost of raw-waveform logging.
 
 ### 2.4 External BLE sensor network (WT9011DCL body sensors + H10)
 
@@ -144,17 +143,17 @@ PCF85063 ───────────────────► timestamps
 3. **SpO2** is reported as min/mean and a "dips below 90%" count — informational, not used for staging.
 4. Because raw-ish data lands on the SD card, the algorithm can be re-tuned offline against the recorded nights (and optionally against a reference device) without reflashing mid-project.
 
-### 3.3 Reliable HRV — requirements
+### 3.3 HRV — a power-permitting nice-to-have (and what doing it well takes)
 
-HRV is the most timing-sensitive thing this device measures. RMSSD is computed from the *differences* between consecutive beat intervals, so it is dominated by small errors in each beat's timestamp — errors that HR (a smoothed average over many beats) completely hides. Getting it right constrains several design choices:
+HRV is a **nice-to-have, not a requirement** — we enable it only when the measured power budget (§2.3) supports the longer clean-capture windows it needs, and **nothing else in the project waits on it**. That said, HRV is the most timing-sensitive thing the device *could* measure: RMSSD is computed from the *differences* between consecutive beat intervals, so it's dominated by small errors in each beat's timestamp — errors that HR (a smoothed average over many beats) completely hides. So *if* we enable HRV, doing it well constrains several design choices:
 
-1. **Timing resolution beats raw sample rate.** RMSSD in relaxed sleep is often 20–60 ms. To resolve that we need per-beat timing error well under ~5 ms. A 200 Hz PPG stream gives only 5 ms sample spacing, so we **must** do sub-sample peak interpolation (parabolic/quadratic fit around the detected peak, or cross-correlation against a beat template) to recover sub-millisecond timing between samples. Sample at **200 Hz minimum, 400 Hz preferred** (MAX30102 supports it) — higher rate makes interpolation more accurate and cheaper.
+1. **Timing resolution beats raw sample rate.** RMSSD in relaxed sleep is often 20–60 ms. To resolve that we need per-beat timing error well under ~5 ms. A 200 Hz PPG stream gives only 5 ms sample spacing, so it needs sub-sample peak interpolation (parabolic/quadratic fit around the detected peak, or cross-correlation against a beat template) to recover sub-millisecond timing between samples. Sample at **200 Hz minimum, 400 Hz preferred** (MAX30102 supports it) — higher rate makes interpolation more accurate and cheaper.
 2. **Fiducial-point consistency.** Pick one repeatable feature per beat and use it for every beat — the systolic-upstroke maximum of the first derivative is more stable against pulse-shape changes than the raw waveform peak. Consistency matters more than which point.
-3. **Beat classification is mandatory, not optional.** Missed/extra beats and motion artifacts create huge fake IBI jumps that wreck RMSSD. The pipeline must classify each IBI (normal / ectopic / artifact) and either interpolate or exclude bad beats before any HRV math. Report the **percentage of accepted beats** alongside every HRV value — an RMSSD from a 40%-accepted window is not trustworthy and must be flagged.
+3. **Beat classification is essential to HRV specifically.** Missed/extra beats and motion artifacts create huge fake IBI jumps that wreck RMSSD, so if HRV is enabled the pipeline should classify each IBI (normal / ectopic / artifact) and interpolate or exclude bad beats before any HRV math. Report the **percentage of accepted beats** alongside every HRV value — an RMSSD from a 40%-accepted window is not trustworthy and should be flagged or hidden.
 4. **HRV only from clean, still windows.** Wrist PPG HRV is only credible during motionless, high-SQI stretches. Gate HRV on: activity count near zero (IMU), SQI above threshold, and a minimum count of consecutive accepted beats (e.g. ≥2 min / ~120 beats for a stable RMSSD). Prefer quality over coverage — report HRV for the windows that qualify and leave gaps elsewhere rather than emitting noise.
 5. **Store the IBI series, not just the summary.** Log the full accepted-IBI list (or the raw PPG) to SD so RMSSD/SDNN/pNN50 and frequency-domain metrics (LF/HF, needs ~5 min windows) can be recomputed and re-tuned offline. The S3's PSRAM makes keeping the raw stream the default.
 6. **Duty-cycling vs. HRV is a real tension.** Short 30–60 s PPG bursts save power but may not contain a long enough clean run for a stable RMSSD. Resolution: run a **nightly HRV mode** that captures longer continuous windows during deep/stable sleep (e.g. a 5-min clean capture per sleep cycle) rather than relying on the short duty-cycle bursts. The sampling scheduler (Phase 2) exposes this as a configurable trade-off.
-7. **Validate against ground truth.** HRV is the one metric where "looks plausible" isn't enough. Validate the IBI series against an ECG chest strap (e.g. Polar H10, which exposes RR intervals over BLE) on the same wrist/session, and require Bland-Altman agreement on RMSSD before declaring HRV "reliable." This is a Phase 3 exit criterion.
+7. **Sanity-check against ground truth (optional).** If HRV is enabled, it's worth checking against an ECG chest strap (e.g. Polar H10, which exposes RR intervals over BLE) on the same wrist/session — good Bland-Altman agreement on RMSSD lets us surface HRV with confidence, poor agreement means we label it low-confidence or hide it. This is a quality check for the HRV feature, **not a gate on any other feature** — core sleep tracking ships regardless.
 
 **Reported HRV metrics:** RMSSD (primary, robust for overnight), SDNN, pNN50, mean IBI, and per-value beat-acceptance % + coverage. Frequency-domain LF/HF is a P2 stretch (needs the longer clean windows from item 6).
 
@@ -183,11 +182,11 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 | Phase | Goal | Exit gate |
 |---|---|---|
 | **0 — Bring-up** | Get the board alive: BSP + display/LVGL up, MAX30102 on the I2C bus | Boots to an LVGL screen; all I2C devices enumerate; runs untethered |
-| *→ de-risk gate* | *Before building, run VALIDATION.md spikes S1–S5* | *S1 passes: wrist PPG good enough for RMSSD on your body* |
-| **1 — Sensor drivers** | Turn raw sensors into live vitals + a trustworthy per-beat IBI series | Live vitals; live RMSSD tracks the H10 reference (still 2-min window) |
-| **2 — Recording** | Log a full night to microSD on battery, with a nightly HRV capture mode | Records an 8 h night; IBI series good enough for per-cycle RMSSD |
+| *→ de-risk checks* | *Before building, run VALIDATION.md spikes S1–S5 (power, SD, coupling)* | *Power/SD/coupling hold up; S1 tells you if the optional HRV feature is feasible* |
+| **1 — Sensor drivers** | Turn raw sensors into live vitals (HR / SpO2 / movement) | Live vitals on screen; RTC + battery gauge working |
+| **2 — Recording** | Log a full night to microSD on battery (HRV capture optional, power-permitting) | Records an 8 h night; log opens cleanly |
 | **2.5 — Body sensors** | Pair WT9011DCL over BLE → authoritative sleep position | Torso sensor reports correct position all night; lands in the SD log |
-| **3 — Sleep scoring** | Score sleep, validate HRV vs ECG, break metrics down by position | Hypnogram/score match a reference; RMSSD agrees with ECG; per-night position breakdown |
+| **3 — Sleep scoring** | Score sleep, break metrics down by position (optionally validate HRV vs ECG) | Hypnogram/score match a reference; per-night position breakdown |
 | **4 — UI polish** | The four v1 screens + 7-night history, usable on-device | A real night's report renders end-to-end from an SD log |
 | **5 — Stretch** | Smart alarm, BLE sync, respiratory rate, snore detection | No hard gate — pick items opportunistically |
 | **v3+ — Integration** | HA/MQTT + combined wrist+CPAP summary | Separate track I0–I5 — see [INTEGRATION.md](INTEGRATION.md) §7 |
@@ -202,22 +201,22 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 ### Phase 1 — Sensor drivers
 **Goal:** turn the raw sensors into trustworthy live vitals and a per-beat IBI series.
-- **Gate — before building the full PPG pipeline:** run the de-risking spikes in [VALIDATION.md](VALIDATION.md) §1. **S1 (wrist-PPG beat timing good enough for RMSSD on your own body) is the make-or-break gate** — a fail here rescopes HRV before the rest of this phase is built.
+- **Before building, run the de-risking spikes** in [VALIDATION.md](VALIDATION.md) §1 (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is feasible on your wrist — it does **not** gate this phase; a poor S1 just means HRV is deferred or dropped while HR/SpO2/movement proceed.
 - [ ] MAX30102 driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
 - [ ] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
 - [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
 - [ ] RTC set/read; battery gauge via AXP2101.
-- [ ] Beat detection with sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %.
-- [ ] Dev-only `refmon` component: subscribe to the Polar H10 RR intervals over BLE and show them next to the wrist RMSSD, timestamped by one device clock (VALIDATION.md §3) — this is the live reference the exit criterion checks against, and it stands up the BLE-central plumbing that `bodynet` reuses in Phase 2.5.
-- **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, movement level, and a live RMSSD that tracks the H10 reference during a still 2-min window.
+- [ ] (Optional, if pursuing HRV) Sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %. (Basic beat detection for HR is already covered above; this is the HRV-grade precision.)
+- [ ] (Optional, if pursuing HRV) Dev-only `refmon` component: subscribe to the Polar H10 RR intervals over BLE and show them next to the wrist RMSSD, timestamped by one device clock (VALIDATION.md §3) — a live reference for tuning HRV. It also stands up the BLE-central plumbing that `bodynet` reuses in Phase 2.5.
+- **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, and movement level. (If HRV is being pursued, a live RMSSD tracking the H10 in a still 2-min window is a nice bonus check — not required to pass this phase.)
 
 ### Phase 2 — Recording pipeline
-**Goal:** record a full night to microSD on battery, including a nightly HRV capture mode.
+**Goal:** record a full night to microSD on battery (with an optional, power-permitting nightly HRV capture mode).
 - [ ] Epoch assembler + ring buffer + SD writer (append-only, crash-safe).
 - [ ] Night session state machine (manual start/stop first; auto-detect later).
 - [ ] Power work: display off, light sleep between sensor windows, duty-cycle scheduler. Measure real overnight battery drain.
-- [ ] Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of relying on short duty-cycle bursts. Log the full accepted-IBI series to SD.
-- **Exit criteria:** device records a full 8-hour night on battery, the log opens cleanly in a notebook/spreadsheet, and the IBI series is complete enough to compute per-cycle RMSSD.
+- [ ] (Optional, power-permitting) Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of short duty-cycle bursts, and log the accepted-IBI series to SD. Enable only if the measured overnight drain (from the power work above) leaves room.
+- **Exit criteria:** device records a full 8-hour night on battery and the log opens cleanly in a notebook/spreadsheet. (If HRV is enabled, the IBI series should be complete enough for per-cycle RMSSD — but HRV is optional, so this doesn't block the phase.)
 
 ### Phase 2.5 — Body-sensor network (WT9011DCL over BLE)
 **Goal:** pair external BLE body sensors to get authoritative sleep position (back/left/right/belly).
@@ -229,13 +228,13 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - **Exit criteria:** a paired torso sensor reports correct position through position changes across a night, survives a disconnect/reconnect, and its position/movement land in the SD log alongside the wrist/PPG data.
 
 ### Phase 3 — Sleep scoring
-**Goal:** score the night, validate HRV against ECG, and break metrics down by body position.
+**Goal:** score the night and break metrics down by body position (optionally validate HRV against ECG).
 - [ ] Actigraphy sleep/wake classifier; tune on recorded nights.
 - [ ] Morning re-pass: stage refinement from HR/HRV, summary metrics, sleep score.
 - [ ] **Position-resolved summaries** — time-in-position (supine vs lateral vs prone), and position-segmented HR/SpO2/HRV, laying the groundwork for the positional-apnea correlation with CPAP data (INTEGRATION.md §6).
 - [ ] Offline analysis scripts (`tools/`, Python) to visualize logs and iterate on parameters.
-- [ ] **HRV validation against ECG ground truth** — record simultaneous sessions vs. a Polar H10 (or equivalent RR-interval reference), compare RMSSD/SDNN with Bland-Altman analysis, and tune the beat detector/artifact filter until agreement is acceptable. **Full protocol in [VALIDATION.md](VALIDATION.md).**
-- **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, overnight RMSSD agrees with the ECG reference within a documented tolerance on clean windows, **and** a per-night position breakdown with position-segmented SpO2.
+- [ ] (Optional, only if HRV is enabled) **HRV sanity-check against ECG** — record simultaneous sessions vs. a Polar H10, compare RMSSD/SDNN with Bland-Altman analysis; good agreement lets us surface HRV with confidence, poor agreement means we label it low-confidence or hide it. **Full protocol in [VALIDATION.md](VALIDATION.md).**
+- **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, **and** a per-night position breakdown with position-segmented SpO2. (If HRV is enabled, ECG agreement on clean windows is a bonus quality check, not a gate.)
 
 ### Phase 4 — UI polish
 **Goal:** make the on-device experience complete and pleasant.
@@ -271,7 +270,7 @@ Engineering techniques to apply as the relevant components are built — most im
 |---|---|
 | Wrist PPG is noisy (motion, contact pressure, ambient light) | SQI gating — discard bad windows rather than log garbage; strap design matters as much as code |
 | Wrist SpO2 accuracy is inherently poor | Report trends/min values, label as estimate |
-| Reliable HRV is hard on wrist PPG — timing errors dominate RMSSD | Sub-sample peak interpolation, 200–400 Hz sampling, beat-acceptance gating, HRV only from still high-SQI windows, ECG-validated (see §3.3) |
+| HRV is hard on wrist PPG — timing errors dominate RMSSD | HRV is a nice-to-have, not a requirement: pursue it only if the power budget allows (§2.3) and the signal supports it (sub-sample interpolation, beat-acceptance gating, still high-SQI windows); if it's too costly or noisy, thin or drop it — core tracking is unaffected (see §3.3) |
 | S3 draws more than the C6 → overnight battery life | 500–1000 mAh cell + duty-cycling; C6 is the documented fallback SoC if drain is still too high |
 | Memory pressure from display + DSP + raw logging | S3's 8 MB PSRAM covers it; keep PPG processing streaming and flush raw buffers to SD periodically |
 | 250 mAh stock battery too small for the S3 | Use a 500–1000 mAh cell on the same MX1.25 connector |

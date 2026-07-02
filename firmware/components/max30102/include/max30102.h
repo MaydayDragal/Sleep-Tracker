@@ -7,7 +7,7 @@
 
 // MAX30102 pulse-oximeter / PPG sensor (external, on the I2C expansion pads
 // @ 0x57). Interrupt-driven FIFO drain keeps the CPU asleep between reads.
-// See PLAN.md §2.2 and §3.3 (reliable-HRV timing requirements).
+// See PLAN.md §2.2 and §3.3 (HRV timing — an optional, power-permitting feature).
 
 typedef struct {
     uint32_t red;   // red LED channel (SpO2)
