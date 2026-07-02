@@ -31,7 +31,8 @@ firmware/
     ├── bsp/                  # board pins/buses/PMU/RTC/SD — the ONLY board-specific code
     ├── max30102/             # PPG sensor driver (FIFO + INT)          [phase1]
     ├── ppg/                  # filtering, beat detect, IBI/HR/SpO2/SQI [phase1]
-    ├── actigraphy/           # QMI8658 activity counts + position      [phase1]
+    ├── actigraphy/           # QMI8658 wrist activity counts           [phase1]
+    ├── bodynet/              # BLE central: WT9011DCL body sensors+H10 [phase2.5]
     ├── sleep_core/           # epoch record, session SM, HRV, scoring  [phase2-3]
     ├── ui/                   # LVGL screens                            [phase0/4]
     └── sync/                 # BLE/MQTT → Home Assistant + CPAP        [integration]

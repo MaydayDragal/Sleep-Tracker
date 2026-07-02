@@ -84,6 +84,28 @@ Rough overnight (8 h) estimate with display off:
 
 That lands roughly in the 3–10 mA average range. The S3 is thirstier than the C6 (dual-core, PSRAM self-refresh in sleep is the main adder), so a **500–1000 mAh Li-Po** is the recommended cell rather than the stock 250 mAh — both fit the same MX1.25 header. Continuous (non-duty-cycled) PPG and the nightly HRV capture windows are the biggest draws; the sampling scheduler (Phase 2) is where we trade fidelity against battery. **If overnight drain proves unacceptable even with the bigger cell, the C6 fallback is the lever** — same firmware, lower-power SoC, at the cost of raw-waveform logging.
 
+### 2.4 External BLE sensor network (WT9011DCL body sensors + H10)
+
+The wrist unit also acts as a **BLE central** for external wireless sensors it does not physically contain:
+
+- **1..N × WitMotion WT9011DCL** — BLE 5.0 9-axis IMUs with an onboard AHRS that outputs Euler **angles directly** (0.2° X/Y accuracy). Worn on the **torso** (and optionally limbs) to capture true body orientation and movement.
+- **Polar H10** — chest ECG, used as an HRV ground-truth reference (see [VALIDATION.md](VALIDATION.md)) and opportunistically for gold-standard beats.
+
+**Why a body sensor at all — the wrist can't do position.** The onboard QMI8658 measures *wrist* orientation, which is a poor proxy for how the *body* is lying (your wrist can point anywhere while you're on your back). A torso-mounted WT9011DCL reports trunk roll/pitch directly, so **sleep position (back / left / right / belly) becomes authoritative** rather than guessed. That is the enabling piece for correlating CPAP events and SpO2 dips against position (INTEGRATION.md §6) — the marquee combined insight ("your AHI is worse on your back"), now robust.
+
+**Position from angle (simple, because the sensor fuses for us).** The WT9011DCL's `0x61` data frame carries acceleration, angular velocity, and Euler angle in one packet. Classification is just thresholding the torso **roll** angle (supine ≈ face-up, prone ≈ ±180°, left/right ≈ ∓90°), with **pitch** distinguishing upright/sitting. No sensor-fusion math on our side.
+
+**Practical constraints to design around:**
+
+| Constraint | Detail | Consequence |
+|---|---|---|
+| Per-sensor battery | 130 mAh, ~14 mA active → **~8 h ≈ one night** per charge | Nightly charging is part of the UX; low output rate (~1–5 Hz for position) helps modestly; app must flag a sensor that died mid-night |
+| BLE connection budget | S3 shares one 2.4 GHz radio between Wi-Fi (HA/MQTT) and BLE; NimBLE supports several links but they compete | Keep body-sensor **connection intervals long** (position is slow-changing) to bound bandwidth/power; cap the number of paired sensors; treat H10 as dev/opportunistic |
+| Wireless time alignment | Each sensor has its own clock; the hub timestamps on receipt | Fine for slow position/movement; don't rely on it for sub-100 ms event alignment |
+| Placement/compliance | Extra straps to don nightly | Torso sensor is the high-value default; limb sensors are an opt-in extension (limb-movement detection) |
+
+Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoins automatically each night. Sensor **role/placement** (torso, left-leg, …) is stored per device so position logic knows which stream is the trunk.
+
 ---
 
 ## 3. Firmware Stack
@@ -95,23 +117,25 @@ That lands roughly in the 3–10 mA average range. The S3 is thirstier than the 
   - `bsp/` — board support: pins, buses, display, touch, PMU, RTC bring-up (adapted from Waveshare's repo). **All board-specific pin/peripheral defs live here** so an S3→C6 swap is confined to this one component.
   - `max30102/` — FIFO-interrupt driver, LED-current control, shutdown/wake.
   - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
-  - `actigraphy/` — QMI8658 driver config + per-epoch activity counts (band-passed accel magnitude).
+  - `actigraphy/` — QMI8658 (wrist) driver config + per-epoch activity counts (band-passed accel magnitude). Wrist movement only; body position comes from `bodynet`.
+  - `bodynet/` — **BLE central** managing 1..N WT9011DCL body sensors (+ the H10 reference): pairing/bonding, per-sensor role/placement, angle→sleep-position classification, per-sensor movement. Shares the BLE-central plumbing the H10 `refmon` uses.
   - `sleep_core/` — epoch assembler, storage writer, sleep-scoring algorithm, night session state machine.
-  - `ui/` — LVGL screens.
-  - `sync/` — BLE GATT service (stretch).
+  - `ui/` — LVGL screens (incl. a sensor-pairing/management screen).
+  - `sync/` — BLE GATT service + MQTT to Home Assistant (stretch).
 
 ### 3.1 Data flow
 
 ```
-QMI8658 (50 Hz accel) ──► activity counts ┐
-MAX30102 (200 Hz PPG) ───► HR, IBIs, SpO2, SQI ┼──► 30 s epoch record ──► ring buffer ──► microSD (CS
-PCF85063 ────────────────► timestamps      ┘                                 │
-                                                                             ▼
-                                                              sleep scorer (on epoch close +
-                                                              full-night re-pass in the morning)
+QMI8658 (50 Hz accel) ─────► wrist activity counts ┐
+MAX30102 (200 Hz PPG) ──────► HR, IBIs, SpO2, SQI   ┤
+WT9011DCL ×N (BLE, ~1-5 Hz) ► body position + movement ┼─► 30 s epoch record ─► ring buffer ─► microSD
+PCF85063 ───────────────────► timestamps            ┘                            │
+                                                                                 ▼
+                                                                  sleep scorer (on epoch close +
+                                                                  full-night re-pass in the morning)
 ```
 
-**Epoch record (~32 bytes):** timestamp, activity count, mean/min/max HR, RMSSD, SpO2, SQI, battery %, flags. A full night is ~1000 epochs ≈ 32 KB — trivial for SD, and even the 16 MB flash could hold months as a fallback.
+**Epoch record (~40 bytes):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI, beat-acceptance %, battery %, flags. A full night is ~1000 epochs ≈ 40 KB — trivial for SD, and even the 16 MB flash could hold months as a fallback. (Raw per-sensor streams, when logged, go to separate SD files keyed by sensor role.)
 
 ### 3.2 Sleep scoring approach
 
@@ -176,12 +200,21 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - [ ] Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of relying on short duty-cycle bursts. Log the full accepted-IBI series to SD.
 - **Exit criteria:** device records a full 8-hour night on battery, the log opens cleanly in a notebook/spreadsheet, and the IBI series is complete enough to compute per-cycle RMSSD.
 
+### Phase 2.5 — Body-sensor network (WT9011DCL over BLE)
+- [ ] `bodynet` BLE-central: scan, pair/bond, and persist a WT9011DCL by MAC + role/placement; auto-reconnect on the next night.
+- [ ] Parse the WitMotion `0x61` frame (accel + angular velocity + Euler angle); expose per-sensor angle + a movement count.
+- [ ] Torso roll/pitch → **sleep position** (back / left / right / belly); log position + body-movement into the epoch record.
+- [ ] Scale to N sensors; long connection intervals; surface a per-sensor battery/last-seen status and a pairing screen in the UI.
+- [ ] (Reuses the same BLE-central plumbing as the H10 `refmon` from VALIDATION.md §3.)
+- **Exit criteria:** a paired torso sensor reports correct position through position changes across a night, survives a disconnect/reconnect, and its position/movement land in the SD log alongside the wrist/PPG data.
+
 ### Phase 3 — Sleep scoring
 - [ ] Actigraphy sleep/wake classifier; tune on recorded nights.
 - [ ] Morning re-pass: stage refinement from HR/HRV, summary metrics, sleep score.
+- [ ] **Position-resolved summaries** — time-in-position (supine vs lateral vs prone), and position-segmented HR/SpO2/HRV, laying the groundwork for the positional-apnea correlation with CPAP data (INTEGRATION.md §6).
 - [ ] Offline analysis scripts (`tools/`, Python) to visualize logs and iterate on parameters.
 - [ ] **HRV validation against ECG ground truth** — record simultaneous sessions vs. a Polar H10 (or equivalent RR-interval reference), compare RMSSD/SDNN with Bland-Altman analysis, and tune the beat detector/artifact filter until agreement is acceptable. **Full protocol in [VALIDATION.md](VALIDATION.md).**
-- **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, **and** overnight RMSSD agrees with the ECG reference within a documented tolerance on clean windows.
+- **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, overnight RMSSD agrees with the ECG reference within a documented tolerance on clean windows, **and** a per-night position breakdown with position-segmented SpO2.
 
 ### Phase 4 — UI polish
 - [ ] Watch face, morning report with hypnogram + HR/SpO2 charts, settings, history of last 7 nights.
@@ -219,11 +252,16 @@ Engineering techniques to apply as the relevant components are built — most im
 | 250 mAh stock battery too small for the S3 | Use a 500–1000 mAh cell on the same MX1.25 connector |
 | Touch controller variant differs by batch (FT3168 vs FT6146) | Probe at runtime; both are FocalTech and near-identical over I2C |
 | Which exact GPIOs the expansion I2C pads map to | Confirm from the Rev1.1 schematic in Waveshare's repo during Phase 0 |
+| Body sensors only last ~one night (130 mAh) | Nightly charging as UX; low output rate; flag a sensor that dies mid-night rather than silently gap |
+| BLE (N body sensors + H10) contends with Wi-Fi on one radio | Long connection intervals (position is slow); cap paired-sensor count; H10 as dev/opportunistic; verify NimBLE max-connections config |
+| Wireless sensors aren't clock-synced to the hub | Hub-receive timestamps suffice for slow position/movement; don't use them for sub-100 ms event alignment |
+| WT9011DCL BLE UUIDs/frame details vary by firmware | Confirm service/char UUIDs + `0x61` framing against the WitMotion datasheet during Phase 2.5 bring-up |
 
 Open questions to settle as we implement (defaults chosen so work can start):
 1. **Session start:** manual "Start sleep" button for v1; auto-detection later. 
 2. **Log format:** binary records + a tiny converter script (CSV is fine too if we prefer eyeballing files).
 3. **Strap/enclosure:** 3D-printed case with sensor window vs. sewing the breakout into a strap pocket.
+4. **Body-sensor count/placement:** default is a single torso sensor for position; limb sensors (limb-movement detection) are an opt-in extension. How many to support as a hard cap?
 
 ---
 
@@ -242,6 +280,7 @@ Sleep-Tracker/
 │   └── components/
 │       ├── bsp/             # board pins/buses/PMU/RTC/SD — only board-specific code
 │       ├── max30102/  ppg/  actigraphy/   # sensing + PPG/HRV pipeline
+│       ├── bodynet/         # BLE central: WT9011DCL body sensors + H10
 │       ├── sleep_core/      # epoch record, session SM, HRV, scoring
 │       └── ui/  sync/       # LVGL screens; BLE/MQTT → HA + CPAP
 ├── hardware/                # wiring diagrams, strap/enclosure files (TODO)

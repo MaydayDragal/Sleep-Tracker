@@ -125,7 +125,7 @@ On wake (or via a "sync" pull-to-refresh), the wrist requests/reads the merged s
 
 Combining wrist biometrics with CPAP therapy data is where the real value lives — several of these need *both* devices. The event-alignment items (#1, #2) are *approximate* on the SD/cloud paths (two devices, two clocks) but become *exact* on the airbridge path (§2.1 option A), where the CPAP records the wrist's SpO2/HR into the same EDF as its own events:
 
-1. **Positional apnea detection** *(wrist-only capability the CPAP lacks)* — cross the wrist IMU's sleep-position log with CPAP event timestamps: "your AHI is 4× higher when sleeping on your back." Neither device can find this alone. Highest-value combined feature.
+1. **Positional apnea detection** *(a capability the CPAP lacks)* — cross **authoritative torso position** from a paired WT9011DCL body sensor (PLAN.md §2.4) with CPAP event timestamps and SpO2 dips: "your AHI is 4× higher when sleeping on your back." The body sensor is the key enabler — the wrist IMU alone can't tell trunk orientation, so this correlation is only trustworthy once a torso sensor is in the mix. Neither device can find this alone. Highest-value combined feature.
 2. **Second-sensor efficacy check** — overlay CPAP residual-event timestamps on the wrist's SpO2/HR traces. Do desats and HR spikes still coincide with events, or is therapy fully controlling them?
 3. **Therapy → recovery trends** — track HRV, deep-sleep %, and resting HR against nightly AHI and usage over weeks. Does better mask seal / higher compliance actually improve measured recovery?
 4. **Leak vs. awakenings** — correlate high-leak periods (CPAP) with wrist-detected awakenings/restlessness to catch mask-fit problems behaviorally.
