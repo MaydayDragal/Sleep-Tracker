@@ -13,7 +13,7 @@ The wrist device should **not** talk to the CPAP directly. CPAP data paths are p
 ```
    ┌─────────────────────┐         Wi-Fi / MQTT         ┌──────────────────────┐
    │  Wrist Sleep Tracker │  ── HR, HRV, SpO2, stages ──►│                      │
-   │  (ESP32-S3 + MAX30102)│ ◄── merged night summary ── │   Home Assistant     │
+   │  (ESP32-S3 + MAX3010x)│ ◄── merged night summary ── │   Home Assistant     │
    └─────────────────────┘                               │   (MQTT broker +     │
                                                           │    automations)      │
    ┌─────────────────────┐   CPAP integration (HACS)     │                      │
@@ -47,7 +47,7 @@ CPAP metrics we care about pulling into the combined summary: **AHI** (apnea-hyp
 
 [`airbreak-plus`](https://github.com/m-kozlowski/airbreak-plus) is a firmware jailbreak for the ResMed AirSense 10 / AirCurve 10 (partial 9/11) that unlocks the clinical menu and, key for us, **full EDF signal recording in all therapy modes**. [`airbridge`](https://github.com/m-kozlowski/airbridge) is an **ESP32** wired to the CPAP's UART accessory port that (a) accepts oximetry (SpO2 + pulse) from BLE oximeters (Nonin 3150, O2Ring, generic) or UDP and **feeds it into the CPAP's native recording**, (b) exposes live pressure/flow waveforms and therapy settings over a Wi-Fi web interface, and (c) provides a TCP↔UART bridge. Together they turn a stock CPAP into a live, scriptable, locally-accessible data source. Two opportunities this opens that the SD/cloud paths cannot:
 
-**A. Feed the wrist's SpO2/HR *into* the CPAP → one perfectly-aligned recording.** airbridge already ingests BLE/UDP oximetry and injects it into the CPAP's recording; airbreak-plus's full-EDF mode then logs it alongside pressure, flow, and events. Our wrist is an ESP32-S3 with BLE and a MAX30102 — it can present as a generic BLE oximeter (or push over Wi-Fi/UDP) so the **CPAP records our SpO2 + pulse in the same EDF as its own signals**. That eliminates the cross-device clock-alignment problem: the apnea event and the desaturation are timestamped by the same machine, so the correlations in §6 become *exact* rather than approximate. This is the single biggest reason to care about these projects.
+**A. Feed the wrist's SpO2/HR *into* the CPAP → one perfectly-aligned recording.** airbridge already ingests BLE/UDP oximetry and injects it into the CPAP's recording; airbreak-plus's full-EDF mode then logs it alongside pressure, flow, and events. Our wrist is an ESP32-S3 with BLE and a MAX3010x PPG sensor — it can present as a generic BLE oximeter (or push over Wi-Fi/UDP) so the **CPAP records our SpO2 + pulse in the same EDF as its own signals**. That eliminates the cross-device clock-alignment problem: the apnea event and the desaturation are timestamped by the same machine, so the correlations in §6 become *exact* rather than approximate. This is the single biggest reason to care about these projects.
 
 **B. Real-time CPAP data, fully local.** airbridge's Wi-Fi TCP-UART/web interface exposes live pressure/flow and settings. Bridge that into HA (MQTT) — or query it directly from the wrist — and the combined summary updates *during* the night instead of waiting on next-morning cloud data. The "CPAP pending…" state in §5 largely disappears.
 

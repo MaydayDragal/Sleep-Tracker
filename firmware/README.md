@@ -1,6 +1,6 @@
 # Sleep Tracker — Firmware
 
-ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** (+ external MAX30102). This is a **scaffold**: the project structure, build config, and component interfaces are in place; the driver/DSP/UI bodies are stubbed and tagged with `TODO(phaseN)` matching the milestones in [`../PLAN.md`](../PLAN.md).
+ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** (+ external MAX3010x PPG sensor: MAX30102 now → MAX30101 planned). This is a **scaffold**: the project structure, build config, and component interfaces are in place; the driver/DSP/UI bodies are stubbed and tagged with `TODO(phaseN)` matching the milestones in [`../PLAN.md`](../PLAN.md).
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ firmware/
 ├── main/                     # app_main: dual-core task setup (sense | UI)
 └── components/
     ├── bsp/                  # board pins/buses/display/touch/PMU/RTC/SD — the ONLY board-specific code [phase0/2]
-    ├── max30102/             # PPG sensor driver (FIFO + INT)          [phase1]
+    ├── max30102/             # MAX3010x PPG driver (MAX30102→30101)    [phase1]
     ├── ppg/                  # filtering, beat detect, IBI/HR/SpO2/SQI [phase1]
     ├── actigraphy/           # QMI8658 wrist activity counts           [phase1]
     ├── bodynet/              # BLE central: WT9011DCL body sensors+H10 [phase2.5]

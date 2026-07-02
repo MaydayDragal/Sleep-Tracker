@@ -1,6 +1,6 @@
 # Sleep-Tracker
 
-A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8) with an external MAX30102 pulse-oximetry sensor. It records heart rate, SpO2, and movement overnight (plus HRV where the signal and power budget allow), scores sleep on-device, and shows a morning report on the AMOLED touch display. (The pin-compatible ESP32-C6 variant is a documented power-optimization fallback — see PLAN.md.)
+A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8) with an external MAX3010x pulse-oximetry sensor (MAX30102 for initial bring-up, transitioning to the MAX30101). It records heart rate, SpO2, and movement overnight (plus HRV where the signal and power budget allow), scores sleep on-device, and shows a morning report on the AMOLED touch display. (The pin-compatible ESP32-C6 variant is a documented power-optimization fallback — see PLAN.md.)
 
 **Start here:** read [PLAN.md](PLAN.md) for the overview and staged roadmap, then do the Phase 0 board bring-up ([firmware/README.md](firmware/README.md)), then run the [VALIDATION.md](VALIDATION.md) de-risking spikes (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is worth pursuing — it doesn't gate anything else.
 

@@ -1,7 +1,7 @@
 // Sleep Tracker — entry point.
 //
 // Architecture (PLAN.md §3): the dual-core S3 lets us keep sensor acquisition
-// isolated from the UI and SD I/O. One core samples the MAX30102 + QMI8658 and
+// isolated from the UI and SD I/O. One core samples the MAX3010x + QMI8658 and
 // assembles epochs; the other drives LVGL and flushes logs. Neither can stall
 // the other, so a screen redraw or a slow SD write never drops a heartbeat.
 
@@ -42,7 +42,7 @@ static void sensor_task(void *arg)
 
     for (;;) {
         // TODO(phase1-2):
-        //   1. drain MAX30102 FIFO -> ppg_process() -> sleep_core_add_beat()
+        //   1. drain MAX3010x FIFO -> ppg_process() -> sleep_core_add_beat()
         //   2. read actigraphy activity
         //   3. on each 30 s boundary: sleep_core_close_epoch() and persist to SD
         vTaskDelay(pdMS_TO_TICKS(1000));

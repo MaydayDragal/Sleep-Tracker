@@ -1,6 +1,6 @@
 # Validation & De-risking Plan
 
-Now that the hardware is in hand (board, MAX30102, **Polar H10**), the smart engineering move *before* building the full firmware is to de-risk a few key assumptions with small, throwaway spikes — mainly power, SD throughput, and sensor coupling. One spike (S1) also checks whether the **optional** HRV feature is feasible on your wrist; HRV is a nice-to-have, so a poor result there just means HRV is deferred or dropped, not that the project is blocked.
+Now that the hardware is in hand (board, MAX30102 — MAX30101 arriving, **Polar H10**), the smart engineering move *before* building the full firmware is to de-risk a few key assumptions with small, throwaway spikes — mainly power, SD throughput, and sensor coupling. One spike (S1) also checks whether the **optional** HRV feature is feasible on your wrist; HRV is a nice-to-have, so a poor result there just means HRV is deferred or dropped, not that the project is blocked.
 
 This doc covers three things:
 1. **De-risking spikes** — the riskiest assumptions and the minimal experiments that test them (§1).
@@ -15,7 +15,7 @@ Each is a rough sketch, not production code — though several feed directly int
 
 | # | Assumption under test | Minimal experiment | Pass bar | If it fails |
 |---|---|---|---|---|
-| **S1** | **Wrist MAX30102 can yield beat timing good enough for RMSSD on *your* body** (decides whether the optional HRV feature is worth pursuing) | Sit still 5 min. Record raw IR PPG to SD + H10 RR simultaneously. Offline: detect beats, compute RMSSD both ways, compare. | RMSSD within ~5–10 ms / <15% of H10 on clean, still data | Iterate sensor pressure/placement, LED current, sample rate — or drop/defer HRV; core tracking is unaffected |
+| **S1** | **Wrist PPG (MAX30102/30101) can yield beat timing good enough for RMSSD on *your* body** (decides whether the optional HRV feature is worth pursuing) | Sit still 5 min. Record raw IR PPG to SD + H10 RR simultaneously. Offline: detect beats, compute RMSSD both ways, compare. | RMSSD within ~5–10 ms / <15% of H10 on clean, still data | Iterate sensor pressure/placement, LED current, sample rate — or drop/defer HRV; core tracking is unaffected |
 | **S2** | **We can tell good windows from bad** (motion robustness) | Record still → slight motion → restless. Watch SQI + activity count. | SQI reliably flags the corrupted windows so they can be excluded | Strengthen SQI (perfusion index, template correlation) before trusting any HRV |
 | **S3** | **PSRAM can buffer full-rate raw data and flush to SD all night without drops** | Synthetic generator: 400 Hz × (red+ir) + 50 Hz accel → PSRAM ring → SD. Run 8 h. Count dropped samples, measure sustained write rate. | Zero drops over a night; SD writes fit well inside the timing budget | Add compression (§ optimizations), lower raw rate, or log epochs-only |
 | **S4** | **S3 + duty-cycling survives a night on the chosen cell** | Run a duty-cycle skeleton with sensors active on the real duty pattern. Read mAh consumed from the AXP2101 fuel gauge over 8 h. | ≥ one full night with comfortable margin on the 500–1000 mAh cell | Tune duty cycle / HRV-window frequency → C6 fallback if still short |
