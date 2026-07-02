@@ -28,14 +28,14 @@ firmware/
 ├── partitions.csv            # app + storage (night logs go to microSD, not flash)
 ├── main/                     # app_main: dual-core task setup (sense | UI)
 └── components/
-    ├── bsp/                  # board pins/buses/PMU/RTC/SD — the ONLY board-specific code
+    ├── bsp/                  # board pins/buses/display/touch/PMU/RTC/SD — the ONLY board-specific code [phase0/2]
     ├── max30102/             # PPG sensor driver (FIFO + INT)          [phase1]
     ├── ppg/                  # filtering, beat detect, IBI/HR/SpO2/SQI [phase1]
     ├── actigraphy/           # QMI8658 wrist activity counts           [phase1]
     ├── bodynet/              # BLE central: WT9011DCL body sensors+H10 [phase2.5]
     ├── sleep_core/           # epoch record, session SM, HRV, scoring  [phase2-3]
-    ├── ui/                   # LVGL screens                            [phase0/4]
-    └── sync/                 # BLE/MQTT → Home Assistant + CPAP        [integration]
+    ├── ui/                   # LVGL screens (on bsp's display/touch)   [phase0/4]
+    └── sync/                 # BLE GATT log-pull (P5) → MQTT to HA+CPAP [phase5/integration]
 ```
 
 ## Board abstraction (S3 ↔ C6)

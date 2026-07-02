@@ -11,6 +11,8 @@ esp_err_t bsp_init(void)
 
     // TODO(phase0): the AXP2101 must enable the display/audio/sensor rails
     // before those chips respond. Do that here once pins are confirmed.
+    // TODO(phase0): bring up the SH8601 QSPI display panel + FT3168 touch here
+    // (board-specific); the `ui` component then attaches LVGL to them.
 
     const i2c_master_bus_config_t cfg = {
         .i2c_port                     = BSP_I2C_PORT,
