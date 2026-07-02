@@ -19,9 +19,3 @@ esp_err_t actigraphy_read_activity(float *out_count)
     if (out_count) *out_count = 0.0f;
     return ESP_ERR_NOT_SUPPORTED;   // TODO(phase1)
 }
-
-esp_err_t actigraphy_get_position(sleep_position_t *out_position)
-{
-    if (out_position) *out_position = SLEEP_POS_UNKNOWN;
-    return ESP_ERR_NOT_SUPPORTED;   // TODO(phase1)
-}

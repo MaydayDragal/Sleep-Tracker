@@ -6,19 +6,21 @@
 // Epoch assembly, night-session state machine, persistence, and sleep scoring.
 // See PLAN.md §3.1 (epoch record) and §3.2 (scoring).
 
-// 30-second epoch record (~32 bytes). Also the row format written to SD.
+// 30-second epoch record (~40 bytes). Also the row format written to SD.
 typedef struct {
-    uint32_t t_unix;       // epoch start, from the PCF85063 RTC
-    uint16_t activity;     // actigraphy count
+    uint32_t t_unix;         // epoch start, from the PCF85063 RTC
+    uint16_t activity;       // wrist actigraphy count
+    uint8_t  body_position;  // body_position_t from bodynet (torso WT9011DCL)
+    uint16_t body_activity;  // body-sensor movement count
     uint8_t  hr_mean;
     uint8_t  hr_min;
     uint8_t  hr_max;
-    uint16_t rmssd_ms;     // HRV for clean windows; 0 if not computed this epoch
+    uint16_t rmssd_ms;       // HRV for clean windows; 0 if not computed this epoch
     uint8_t  spo2_pct;
-    uint8_t  sqi;          // 0..100 signal quality
+    uint8_t  sqi;            // 0..100 signal quality
     uint8_t  batt_pct;
-    uint8_t  beat_accept;  // % accepted beats backing hr_* / rmssd (§3.3)
-    uint8_t  flags;        // bitfield: wrist-off, motion, desat, etc.
+    uint8_t  beat_accept;    // % accepted beats backing hr_* / rmssd (§3.3)
+    uint8_t  flags;          // bitfield: wrist-off, motion, desat, sensor-lost, etc.
 } sleep_epoch_t;
 
 typedef enum {

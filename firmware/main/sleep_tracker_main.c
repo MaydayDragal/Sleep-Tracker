@@ -13,6 +13,7 @@
 #include "max30102.h"
 #include "ppg.h"
 #include "actigraphy.h"
+#include "bodynet.h"
 #include "sleep_core.h"
 #include "ui.h"
 #include "sync.h"
@@ -66,6 +67,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(bsp_init());         // PMU rails, clocks, shared I2C bus
     bsp_sdcard_mount("/sdcard");         // night logs (TODO: wire in bsp)
+    bodynet_init();                      // BLE central for WT9011DCL body sensors + H10
     sync_init();                         // BLE/MQTT — stretch, no-op for now
 
     // UI on core 0, sensing pinned to core 1.

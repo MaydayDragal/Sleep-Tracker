@@ -36,11 +36,19 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 
 ## 3. Movement & Activity
 
-- **[P0] Actigraphy pipeline** — band-passed accel magnitude → per-epoch activity counts
+- **[P0] Actigraphy pipeline** — band-passed accel magnitude → per-epoch activity counts (wrist)
 - **[P1] Wake-on-motion** — IMU interrupt wakes the system from low-power states
-- **[P1] Sleep-position change log** — orientation shifts through the night
 - **[P2] Daytime step counting** — QMI8658 pedometer; makes it a passable daytime watch too
 - **[P2] Wrist-off detection** — accel stillness + PPG contact loss ends/pauses a session instead of logging garbage
+
+### 3a. Body-sensor network (WT9011DCL over BLE) — PLAN.md §2.4
+
+- **[P1] Pair & manage multiple WT9011DCL sensors** — the wrist unit is a BLE central: scan, bond, assign a role/placement (torso, left-leg…), auto-reconnect nightly, show per-sensor battery/last-seen
+- **[P1] Authoritative sleep position** — torso sensor's Euler angle → back / left / right / belly (the wrist IMU can't do this reliably); per-night time-in-position breakdown
+- **[P1] Position-segmented biometrics** — HR / SpO2 / HRV split by body position → enables the positional-apnea correlation (see §11)
+- **[P2] Body-movement logging** — per-sensor movement counts through the night (whole-body restlessness map)
+- **[P2] Limb-movement detection** — optional leg sensors flag periodic limb movements / restless-legs patterns, a sleep disorder that often co-occurs with apnea
+- **[P2] Position feedback / anti-supine nudge** — gentle haptic/tone cue when back-sleeping worsens events (needs the CPAP/SpO2 link to know it's harmful)
 
 ## 4. Audio (ES8311 codec + dual mics + speaker)
 
@@ -115,7 +123,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P2] Combined night summary on the wrist** — the headline: pull CPAP therapy data (AHI, mask leak, pressure, usage) back from HA and render it alongside device metrics on the AMOLED
 - **[P2] Remote config from HA** — set alarm, thresholds, brightness from a phone/dashboard; publish live HR while awake
 - **[P2] OTA over Wi-Fi via HA** — ties into §10 OTA
-- **[P2] Positional-apnea detection** — cross wrist IMU sleep position with CPAP event timestamps ("AHI 4× higher on your back") — neither device can do this alone
+- **[P2] Positional-apnea detection** — cross **authoritative torso position** (WT9011DCL, §3a) with CPAP event timestamps and SpO2 dips: "AHI and desats 4× higher on your back." The body sensor is what makes this reliable rather than a wrist guess
 - **[P2] Second-sensor efficacy check** — overlay CPAP residual-event times on wrist SpO2/HR traces to see if therapy is fully controlling events
 - **[P2] Wrist-as-CPAP-oximeter** *(airbridge/airbreak path)* — the ESP32-S3 presents as a BLE/UDP oximeter so the CPAP records the wrist's SpO2/HR in its own EDF → *exact* event alignment and a real-time combined card (see INTEGRATION.md §2.1). Requires modifying CPAP firmware — opt-in, risk noted
 - **[P2] Therapy → recovery trends** — HRV / deep-sleep / RHR vs. nightly AHI and CPAP usage over weeks
