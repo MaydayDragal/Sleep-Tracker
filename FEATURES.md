@@ -140,6 +140,44 @@ New ideas unlocked now that the board + H10 are in hand — several lean on the 
 - **[P2] Live HRV biofeedback wind-down** — pre-sleep paced-breathing coach driven by real-time RMSSD on the AMOLED, to lower arousal before tracking starts
 - **[P2] Opportunistic H10 fusion** — if the H10 happens to be worn (e.g. a workout), ingest its RR to enrich daytime HRV data with gold-standard beats
 
+## 13. Additional derivable metrics (opportunistic — existing sensors only)
+
+Extra metrics we *could* derive from the sensors already in the design (MAX3010x PPG, wrist QMI8658, torso WT9011DCL, ES8311 mic, and the H10 when worn) — **no new hardware**. These are a wish-list to work toward **only if time, code, storage, and power allow**; treat them as below P2. Feasibility tags: 🟢 solid · 🟡 workable · 🔬 research-grade. Several extend or fuse features listed above.
+
+### From the PPG (MAX3010x)
+- 🟢 **Perfusion index (PI)** — AC/DC ratio of the PPG; doubles as a contact-quality/SQI signal and a peripheral-vasoconstriction indicator
+- 🟢 **Oxygen Desaturation Index (ODI)** — desaturations/hour; formalizes the §2 desat-events feature into a screening number
+- 🟡 **Autonomic arousal detection** — HR surge + PPG-amplitude drop + micro-movement → likely arousal; feeds sleep-fragmentation scoring
+- 🟡 **Vasoconstriction / sympathetic tone** — PPG amplitude trends (stress / cold / arousal)
+- 🟡 **Heart-rate recovery & daytime resting-HR trend** — fitness/recovery signal (daytime)
+- 🔬 **Cuffless blood-pressure *trend* (pulse transit time)** — H10 R-peak → wrist PPG foot; relative only, needs personal calibration, and only when the H10 is worn
+- 🟢 **Green vs red/IR cross-check** (once on the MAX30101) — better HR + motion-artifact flagging
+
+### From the IMUs (wrist QMI8658 + torso WT9011DCL)
+- 🟢 **Respiratory rate from the torso sensor** — chest-wall motion; more robust than the PPG-derived RR (§2)
+- 🟡 **Respiratory effort / paradoxical-breathing pattern** — torso accel/gyro; apnea-relevant
+- 🟢 **Turn / position-change frequency** and 🟢 **sleep-fragmentation index** — movement counts (wrist + torso)
+- 🟡 **Periodic limb / body-jerk detection** — twitch / PLM patterns (extends the §3a limb-movement idea)
+- 🟢 **Sleep-onset & wake detection** — movement cessation + HR drop (enables the §1 auto-session-start)
+- 🟡 **Daytime steps / cadence & fall detection** — if a daytime mode is ever added
+- 🔬 **Ballistocardiography HR** — heartbeat micro-motion when very still (cross-check vs PPG)
+
+### From the mic (ES8311)
+- 🟢 **Breathing rate from audio** (quiet room) — a third independent RR source to fuse
+- 🟡 **Cough detection** (illness) · 🟡 **sleep-talking events** · 🔬 **bruxism / teeth-grinding** (mic + wrist IMU)
+- *(Snore detection + ambient-noise profile already in §4.)*
+
+### Fusion / multi-sensor (the high-value combinations)
+- 🟡 **On-device apnea/hypopnea proxy (rough AHI without the CPAP)** — fuse SpO2 desats + HR surges + reduced chest movement (torso IMU) + snore-then-silence (mic); an independent cross-check against the CPAP data (INTEGRATION.md §6)
+- 🟢 **Fused respiratory rate** — triangulate torso IMU + PPG + mic into one robust breaths/min
+- 🟡 **Composite arousal / fragmentation scoring** — arousals from PPG + IMU + mic feeding the sleep score
+
+### Context (not health metrics)
+- 🟢 **Sleep-timing regularity / circadian consistency** (RTC + history; see §8)
+- 🟢 **Wear-time / charge behavior** (AXP2101) — usage analytics
+
+**Out of reach without new hardware** (don't chase these on the current sensor set): skin temperature, ambient light, true airflow.
+
 ---
 
 ## Suggested build order (cross-reference PLAN.md phases)
@@ -151,4 +189,5 @@ New ideas unlocked now that the board + H10 are in hand — several lean on the 
 | P1 | HRV (nice-to-have, power-permitting; opportunistic across Phases 1–3), auto sleep detection, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
 | P2 | Audio features, insights/correlations, BLE/Wi-Fi sync, EDF, AOD | Phase 5+ |
 | Integration (§11) | HA/MQTT uplink → CPAP downlink → combined summary → cross-device insights | v3+ — integration track I0–I5 (INTEGRATION.md §7) |
+| Opportunistic (§13) | Extra derivable metrics from existing sensors — RR fusion, apnea proxy, PI/ODI, arousal detection, audio/IMU-derived signals | Phase 5+ / only as time·code·storage·power allow |
 | HW | Vibration motor, room climate sensor, lux sensor | Whenever the soldering iron is warm |
