@@ -12,7 +12,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 ## 1. Sleep Tracking (core)
 
 - **[P0] Sleep/wake detection** per 30 s epoch (actigraphy-based, HR-assisted)
-- **[P0] Sleep staging estimate** — awake / light / deep / REM from movement + HR/HRV
+- **[P0] Sleep staging estimate** — awake / light / deep / REM from movement + HR (HRV as an optional refinement)
 - **[P0] Hypnogram** — full-night stage timeline
 - **[P0] Sleep summary metrics** — total sleep time, time in bed, sleep efficiency, sleep-onset latency, WASO (wake after sleep onset), number of awakenings
 - **[P0] Sleep score** — single 0–100 number blending duration, efficiency, continuity, and stage balance
@@ -27,7 +27,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P0] Resting heart rate** — nightly RHR, the single most useful trend number
 - **[P0] SpO2 monitoring** — per-epoch estimate, nightly min/mean
 - **[P0] Signal-quality index** — every biometric tagged with confidence; bad windows discarded, not logged as fact
-- **[P0] HRV (core goal)** — reliable beat-to-beat IBI capture → RMSSD/SDNN/pNN50 per clean window and nightly average; sub-sample peak timing, beat-acceptance gating, ECG-validated. See PLAN.md §3.3
+- **[P1] HRV (nice-to-have, power-permitting)** — beat-to-beat IBI capture → RMSSD/SDNN/pNN50 per clean window and nightly average; rides on the PPG the device already runs, enabled when the power budget allows. Sub-sample peak timing + beat-acceptance gating; optionally sanity-checked against the H10. Not a prerequisite for anything else — see PLAN.md §3.3
 - **[P2] Frequency-domain HRV** — LF/HF from ~5-min clean windows (needs longer continuous captures)
 - **[P1] SpO2 desaturation events** — count and duration of dips below a threshold (informational, not diagnostic)
 - **[P1] Respiratory rate** — breaths/min derived from PPG baseline modulation
@@ -146,9 +146,9 @@ New ideas unlocked now that the board + H10 are in hand — several lean on the 
 
 | Tier | Contents | Lands in |
 |---|---|---|
-| P0 | Sections 1, 2 (incl. HRV core, Phases 1–3), 3 (wrist actigraphy), 7 cores + basic alarm, watch face, morning report, power/battery basics | Phases 0–4 |
+| P0 | Sections 1, 2 (HR/SpO2 core), 3 (wrist actigraphy), 7 cores + basic alarm, watch face, morning report, power/battery basics | Phases 0–4 |
 | P1 (§3a) | Body-sensor network: pair/manage WT9011DCL, authoritative sleep position; position-segmented biometrics in Phase 3 | Phase 2.5–3 |
-| P1 | Auto sleep detection, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
+| P1 | HRV (nice-to-have, power-permitting; opportunistic across Phases 1–3), auto sleep detection, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
 | P2 | Audio features, insights/correlations, BLE/Wi-Fi sync, EDF, AOD | Phase 5+ |
 | Integration (§11) | HA/MQTT uplink → CPAP downlink → combined summary → cross-device insights | v3+ — integration track I0–I5 (INTEGRATION.md §7) |
 | HW | Vibration motor, room climate sensor, lux sensor | Whenever the soldering iron is warm |

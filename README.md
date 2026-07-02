@@ -1,15 +1,15 @@
 # Sleep-Tracker
 
-A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8) with an external MAX30102 pulse-oximetry sensor. It records heart rate, SpO2, HRV, and movement overnight, scores sleep on-device, and shows a morning report on the AMOLED touch display. (The pin-compatible ESP32-C6 variant is a documented power-optimization fallback — see PLAN.md.)
+A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8) with an external MAX30102 pulse-oximetry sensor. It records heart rate, SpO2, and movement overnight (plus HRV where the signal and power budget allow), scores sleep on-device, and shows a morning report on the AMOLED touch display. (The pin-compatible ESP32-C6 variant is a documented power-optimization fallback — see PLAN.md.)
 
-**Start here:** read [PLAN.md](PLAN.md) for the overview and staged roadmap, then do the Phase 0 board bring-up ([firmware/README.md](firmware/README.md)), then run [VALIDATION.md](VALIDATION.md) spike **S1** — it gates committing to the full Phase 1 PPG pipeline.
+**Start here:** read [PLAN.md](PLAN.md) for the overview and staged roadmap, then do the Phase 0 board bring-up ([firmware/README.md](firmware/README.md)), then run the [VALIDATION.md](VALIDATION.md) de-risking spikes (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is worth pursuing — it doesn't gate anything else.
 
 ## Documentation map (reading order)
 
 | Doc | What it covers | When you need it |
 |---|---|---|
 | **[PLAN.md](PLAN.md)** | Full plan: hardware, firmware stack, sleep-scoring, power budget, and the phased milestones (§5) | Read first — the context for everything else |
-| **[VALIDATION.md](VALIDATION.md)** | De-risking spikes + the Polar H10 HRV-validation protocol | The first hands-on work once Phase 0 bring-up is done |
+| **[VALIDATION.md](VALIDATION.md)** | De-risking spikes (power, SD, coupling) + the optional Polar H10 HRV-validation protocol | The first hands-on work once Phase 0 bring-up is done |
 | **[`firmware/`](firmware/)** | ESP-IDF v5.x scaffold (ESP32-S3) — [build instructions](firmware/README.md) | When you start writing/flashing code |
 | **[FEATURES.md](FEATURES.md)** | Prioritized feature list (P0 core → P2 stretch → HW add-ons) | Reference — the backlog |
 | **[INTEGRATION.md](INTEGRATION.md)** | Long-term Home Assistant + CPAP integration design | Long-term reference — not needed for Phases 0–4 |
@@ -19,11 +19,11 @@ A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](ht
 The project is built in staged milestones (full detail + exit criteria in [PLAN.md §5](PLAN.md#5-milestones)):
 
 - **Phase 0 — Board bring-up:** boots into an LVGL screen, all I2C devices enumerate, runs untethered.
-- *→ De-risk gate:* run VALIDATION spikes; **S1** (wrist PPG good enough for HRV on your body) gates Phase 1.
-- **Phase 1 — Sensor drivers:** live HR / SpO2 / movement and a live RMSSD tracking the H10 reference.
+- *→ De-risk checks:* run VALIDATION spikes (power, SD, coupling); **S1** tells you whether the *optional* HRV feature is feasible — it doesn't gate the build.
+- **Phase 1 — Sensor drivers:** live HR / SpO2 / movement on screen (HRV optional, power-permitting).
 - **Phase 2 — Recording pipeline:** records a full 8-hour night to microSD on battery.
 - **Phase 2.5 — Body-sensor network:** a paired torso WT9011DCL logs authoritative sleep position all night.
-- **Phase 3 — Sleep scoring:** hypnogram + score, HRV validated against ECG, position-resolved summaries.
+- **Phase 3 — Sleep scoring:** hypnogram + score, position-resolved summaries (optional HRV check against ECG).
 - **Phase 4 — UI polish:** watch face, morning report, settings, 7-night history.
 - **Phase 5 — Stretch:** smart alarm, BLE/companion sync, respiratory rate, snore detection.
 - **v3+ — Integration:** Home Assistant + CPAP combined summary (separate track, see [INTEGRATION.md](INTEGRATION.md) §7).

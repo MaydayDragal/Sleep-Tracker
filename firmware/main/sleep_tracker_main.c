@@ -26,7 +26,7 @@ static void sensor_task(void *arg)
     i2c_master_bus_handle_t bus;
     ESP_ERROR_CHECK(bsp_i2c_get_bus(&bus));
 
-    // 400 Hz PPG gives the timing headroom reliable HRV needs (PLAN.md §3.3).
+    // 400 Hz PPG gives headroom for the optional HRV feature (PLAN.md §3.3); HR/SpO2 need less.
     const max30102_config_t ppg_cfg = {
         .sample_rate_hz  = 400,
         .led_current_red = 40,
