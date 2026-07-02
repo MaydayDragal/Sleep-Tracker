@@ -117,6 +117,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P2] OTA over Wi-Fi via HA** — ties into §10 OTA
 - **[P2] Positional-apnea detection** — cross wrist IMU sleep position with CPAP event timestamps ("AHI 4× higher on your back") — neither device can do this alone
 - **[P2] Second-sensor efficacy check** — overlay CPAP residual-event times on wrist SpO2/HR traces to see if therapy is fully controlling events
+- **[P2] Wrist-as-CPAP-oximeter** *(airbridge/airbreak path)* — the ESP32-S3 presents as a BLE/UDP oximeter so the CPAP records the wrist's SpO2/HR in its own EDF → *exact* event alignment and a real-time combined card (see INTEGRATION.md §2.1). Requires modifying CPAP firmware — opt-in, risk noted
 - **[P2] Therapy → recovery trends** — HRV / deep-sleep / RHR vs. nightly AHI and CPAP usage over weeks
 - **[P2] Mask-off / compliance automations** — "asleep but mask off" nudges, usage streaks, bedtime reminders (HA-side)
 
