@@ -2,7 +2,7 @@
 
 Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED-1.8 + MAX30102). Organized by category, with a priority tier on each item:
 
-- **[P0]** core — the device isn't a sleep tracker without it (maps to Phases 0–3 in PLAN.md)
+- **[P0]** core — the device isn't a sleep tracker without it (maps to Phases 0–4 in PLAN.md)
 - **[P1]** should-have — planned, but the device is useful before it lands
 - **[P2]** stretch — valuable, build when the foundation is solid
 - **[HW]** requires additional hardware beyond the board + MAX30102
@@ -146,8 +146,9 @@ New ideas unlocked now that the board + H10 are in hand — several lean on the 
 
 | Tier | Contents | Lands in |
 |---|---|---|
-| P0 | Sections 1, 2, 3, 7 cores + basic alarm, watch face, morning report, power/battery basics | Phases 0–4 |
-| P1 | Auto sleep detection, HRV, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
+| P0 | Sections 1, 2 (incl. HRV core, Phases 1–3), 3 (wrist actigraphy), 7 cores + basic alarm, watch face, morning report, power/battery basics | Phases 0–4 |
+| P1 (§3a) | Body-sensor network: pair/manage WT9011DCL, authoritative sleep position; position-segmented biometrics in Phase 3 | Phase 2.5–3 |
+| P1 | Auto sleep detection, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
 | P2 | Audio features, insights/correlations, BLE/Wi-Fi sync, EDF, AOD | Phase 5+ |
-| Integration (§11) | HA/MQTT uplink → CPAP downlink → combined summary → cross-device insights | Phase 6 / v3+ (see INTEGRATION.md §7) |
+| Integration (§11) | HA/MQTT uplink → CPAP downlink → combined summary → cross-device insights | v3+ — integration track I0–I5 (INTEGRATION.md §7) |
 | HW | Vibration motor, room climate sensor, lux sensor | Whenever the soldering iron is warm |

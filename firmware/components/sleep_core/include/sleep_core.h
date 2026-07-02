@@ -6,7 +6,7 @@
 // Epoch assembly, night-session state machine, persistence, and sleep scoring.
 // See PLAN.md §3.1 (epoch record) and §3.2 (scoring).
 
-// 30-second epoch record (~40 bytes). Also the row format written to SD.
+// 30-second epoch record (~24 bytes packed/aligned). Also the row format written to SD.
 typedef struct {
     uint32_t t_unix;         // epoch start, from the PCF85063 RTC
     uint16_t activity;       // wrist actigraphy count

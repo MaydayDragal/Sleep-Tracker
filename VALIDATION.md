@@ -79,4 +79,10 @@ Plan: add `refmon` as a **build-flag-gated dev component** (compiled out of rele
 
 ## 5. How this sequences with PLAN.md
 
-Run the spikes during / just before **Phase 1**. S1 in particular should gate committing to the full PPG pipeline. §2's protocol *is* the Phase 3 HRV-validation exit criterion, made concrete. §3's `refmon` is worth building early — it pays for itself across all of Phase 1–3.
+Run all the spikes up front, during / just before **Phase 1** — front-loading them is the whole point (learn the risk in week 1, not month 3). Each still retires a *different* phase's risk:
+
+- **S1, S2 → gate Phase 1** (PPG/HRV feasibility and SQI). Run **S1 first — it's the make-or-break gate** on committing to the full PPG pipeline.
+- **S3, S4 → de-risk Phase 2** (raw-to-SD throughput and overnight power). S3 backs the Phase 2 double-buffered DMA-SD design in PLAN.md §5.1.
+- **S5 → de-risks mechanical coupling** before the first full-night recording (Phase 2's exit criterion).
+
+§2's protocol *is* the Phase 3 HRV-validation exit criterion, made concrete. §3's `refmon` is worth building early (scheduled as a Phase 1 task) — it pays for itself across all of Phase 1–3.

@@ -127,7 +127,7 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
 
 ```
 QMI8658 (50 Hz accel) ─────► wrist activity counts ┐
-MAX30102 (200 Hz PPG) ──────► HR, IBIs, SpO2, SQI   ┤
+MAX30102 (400 Hz PPG) ──────► HR, IBIs, SpO2, SQI   ┤
 WT9011DCL ×N (BLE, ~1-5 Hz) ► body position + movement ┼─► 30 s epoch record ─► ring buffer ─► microSD
 PCF85063 ───────────────────► timestamps            ┘                            │
                                                                                  ▼
@@ -135,7 +135,7 @@ PCF85063 ───────────────────► timestamps
                                                                   full-night re-pass in the morning)
 ```
 
-**Epoch record (~40 bytes):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI, beat-acceptance %, battery %, flags. A full night is ~1000 epochs ≈ 40 KB — trivial for SD, and even the 16 MB flash could hold months as a fallback. (Raw per-sensor streams, when logged, go to separate SD files keyed by sensor role.)
+**Epoch record (~24 bytes):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI, beat-acceptance %, battery %, flags. A full night is ~1000 epochs ≈ 24 KB — trivial for SD, and even the 16 MB flash could hold months as a fallback. (Raw per-sensor streams, when logged, go to separate SD files keyed by sensor role.)
 
 ### 3.2 Sleep scoring approach
 
@@ -178,22 +178,41 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 ## 5. Milestones
 
+**The arc at a glance** — read this first, then the per-phase detail below. Each phase has a one-line goal and an exit gate you can check against.
+
+| Phase | Goal | Exit gate |
+|---|---|---|
+| **0 — Bring-up** | Get the board alive: BSP + display/LVGL up, MAX30102 on the I2C bus | Boots to an LVGL screen; all I2C devices enumerate; runs untethered |
+| *→ de-risk gate* | *Before building, run VALIDATION.md spikes S1–S5* | *S1 passes: wrist PPG good enough for RMSSD on your body* |
+| **1 — Sensor drivers** | Turn raw sensors into live vitals + a trustworthy per-beat IBI series | Live vitals; live RMSSD tracks the H10 reference (still 2-min window) |
+| **2 — Recording** | Log a full night to microSD on battery, with a nightly HRV capture mode | Records an 8 h night; IBI series good enough for per-cycle RMSSD |
+| **2.5 — Body sensors** | Pair WT9011DCL over BLE → authoritative sleep position | Torso sensor reports correct position all night; lands in the SD log |
+| **3 — Sleep scoring** | Score sleep, validate HRV vs ECG, break metrics down by position | Hypnogram/score match a reference; RMSSD agrees with ECG; per-night position breakdown |
+| **4 — UI polish** | The four v1 screens + 7-night history, usable on-device | A real night's report renders end-to-end from an SD log |
+| **5 — Stretch** | Smart alarm, BLE sync, respiratory rate, snore detection | No hard gate — pick items opportunistically |
+| **v3+ — Integration** | HA/MQTT + combined wrist+CPAP summary | Separate track I0–I5 — see [INTEGRATION.md](INTEGRATION.md) §7 |
+
 ### Phase 0 — Bring-up & skeleton (foundation)
+**Goal:** get the board alive and wearable — pixels on screen, every device answering, running on battery.
 - [ ] Repo scaffolding: ESP-IDF project, CI build (GitHub Actions with `espressif/idf` container), `sdkconfig.defaults`.
-- [ ] Port Waveshare BSP: display + touch + LVGL "hello world"; verify PMU, RTC, IMU, SD over I2C/SPI.
+- [ ] Port Waveshare BSP: display + touch + LVGL "hello world"; verify PMU, RTC, IMU over I2C, and detect the microSD card over SPI (FAT mount + crash-safe writer come in Phase 2).
 - [ ] Wire MAX30102 to the I2C pads; confirm it ACKs at `0x57` alongside the onboard devices.
 - [ ] First-pass strap/enclosure so the unit can actually be worn (even if crude).
 - **Exit criteria:** board boots into an LVGL screen, all I2C devices enumerate, battery charges and runs untethered.
 
 ### Phase 1 — Sensor drivers
+**Goal:** turn the raw sensors into trustworthy live vitals and a per-beat IBI series.
+- **Gate — before building the full PPG pipeline:** run the de-risking spikes in [VALIDATION.md](VALIDATION.md) §1. **S1 (wrist-PPG beat timing good enough for RMSSD on your own body) is the make-or-break gate** — a fail here rescopes HRV before the rest of this phase is built.
 - [ ] MAX30102 driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
 - [ ] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
 - [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
 - [ ] RTC set/read; battery gauge via AXP2101.
 - [ ] Beat detection with sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %.
-- **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, movement level, and a live RMSSD that tracks a reference during a still 2-min window.
+- [ ] Dev-only `refmon` component: subscribe to the Polar H10 RR intervals over BLE and show them next to the wrist RMSSD, timestamped by one device clock (VALIDATION.md §3) — this is the live reference the exit criterion checks against, and it stands up the BLE-central plumbing that `bodynet` reuses in Phase 2.5.
+- **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, movement level, and a live RMSSD that tracks the H10 reference during a still 2-min window.
 
 ### Phase 2 — Recording pipeline
+**Goal:** record a full night to microSD on battery, including a nightly HRV capture mode.
 - [ ] Epoch assembler + ring buffer + SD writer (append-only, crash-safe).
 - [ ] Night session state machine (manual start/stop first; auto-detect later).
 - [ ] Power work: display off, light sleep between sensor windows, duty-cycle scheduler. Measure real overnight battery drain.
@@ -201,14 +220,16 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - **Exit criteria:** device records a full 8-hour night on battery, the log opens cleanly in a notebook/spreadsheet, and the IBI series is complete enough to compute per-cycle RMSSD.
 
 ### Phase 2.5 — Body-sensor network (WT9011DCL over BLE)
+**Goal:** pair external BLE body sensors to get authoritative sleep position (back/left/right/belly).
 - [ ] `bodynet` BLE-central: scan, pair/bond, and persist a WT9011DCL by MAC + role/placement; auto-reconnect on the next night.
 - [ ] Parse the WitMotion `0x61` frame (accel + angular velocity + Euler angle); expose per-sensor angle + a movement count.
 - [ ] Torso roll/pitch → **sleep position** (back / left / right / belly); log position + body-movement into the epoch record.
 - [ ] Scale to N sensors; long connection intervals; surface a per-sensor battery/last-seen status and a pairing screen in the UI.
-- [ ] (Reuses the same BLE-central plumbing as the H10 `refmon` from VALIDATION.md §3.)
+- [ ] (Reuses the BLE-central plumbing first stood up for the H10 `refmon` in Phase 1 — VALIDATION.md §3.)
 - **Exit criteria:** a paired torso sensor reports correct position through position changes across a night, survives a disconnect/reconnect, and its position/movement land in the SD log alongside the wrist/PPG data.
 
 ### Phase 3 — Sleep scoring
+**Goal:** score the night, validate HRV against ECG, and break metrics down by body position.
 - [ ] Actigraphy sleep/wake classifier; tune on recorded nights.
 - [ ] Morning re-pass: stage refinement from HR/HRV, summary metrics, sleep score.
 - [ ] **Position-resolved summaries** — time-in-position (supine vs lateral vs prone), and position-segmented HR/SpO2/HRV, laying the groundwork for the positional-apnea correlation with CPAP data (INTEGRATION.md §6).
@@ -217,13 +238,17 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 - **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, overnight RMSSD agrees with the ECG reference within a documented tolerance on clean windows, **and** a per-night position breakdown with position-segmented SpO2.
 
 ### Phase 4 — UI polish
+**Goal:** make the on-device experience complete and pleasant.
 - [ ] Watch face, morning report with hypnogram + HR/SpO2 charts, settings, history of last 7 nights.
 - [ ] Tilt-to-wake, brightness/AOD handling.
+- **Exit criteria:** all four v1 screens plus the 7-night history are navigable on-device, and a real night's report renders end-to-end from an SD log.
 
 ### Phase 5 — Stretch features
+**Goal:** add the nice-to-haves once the core device is solid.
 - [ ] Smart alarm (light-sleep window + ES8311 speaker tones).
 - [ ] BLE GATT sync + simple companion (Web Bluetooth page or Python script) to pull logs.
 - [ ] Respiratory rate from PPG; snore detection from mics; Wi-Fi upload/dashboard.
+- **No hard gate:** stretch items are picked opportunistically — ship whichever land and defer the rest. (Home Assistant + CPAP integration continues as the separate v3+ track I0–I5 in [INTEGRATION.md](INTEGRATION.md) §7.)
 
 ### 5.1 Optimizations & techniques to bank
 

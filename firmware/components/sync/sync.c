@@ -1,7 +1,8 @@
 #include "sync.h"
 #include "esp_log.h"
 
-// STUB (integration roadmap I0-I5, INTEGRATION.md §7).
+// STUB: Phase 5 BLE GATT sync + companion log-pull (PLAN.md §5), then the v3+
+// integration roadmap I0-I5 — MQTT to Home Assistant + CPAP (INTEGRATION.md §7).
 
 static const char *TAG = "sync";
 
