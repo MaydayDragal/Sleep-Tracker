@@ -13,5 +13,8 @@
 // Configure the QMI8658 (gyro off for power) on the shared I2C bus.
 esp_err_t actigraphy_init(i2c_master_bus_handle_t bus);
 
-// Accumulated activity count since the last call (resets on read).
+// Latest accelerometer sample in g (any pointer may be NULL).
+esp_err_t actigraphy_read_accel_g(float *ax, float *ay, float *az);
+
+// Instantaneous activity proxy: |accel magnitude - 1 g|.
 esp_err_t actigraphy_read_activity(float *out_count);

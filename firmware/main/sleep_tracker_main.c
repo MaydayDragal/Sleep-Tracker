@@ -13,10 +13,15 @@
 #include "max30102.h"
 #include "ppg.h"
 #include "actigraphy.h"
+#include "pcf85063.h"
+#include "pmu.h"
 #include "bodynet.h"
 #include "sleep_core.h"
 #include "ui.h"
 #include "sync.h"
+
+#include <math.h>
+#include <stdio.h>
 
 static const char *TAG = "main";
 
@@ -34,18 +39,61 @@ static void sensor_task(void *arg)
         .int_gpio        = -1,   // TODO(phase1): wire FIFO-ready INT to a spare GPIO
     };
     max30102_init(bus, &ppg_cfg);   // TODO(phase1): real driver
-    actigraphy_init(bus);           // TODO(phase1): real driver
+    actigraphy_init(bus);           // QMI8658 accel (real)
+    pcf85063_init(bus);             // PCF85063 RTC (real)
+    pmu_init(bus);                  // AXP2101 PMU (real)
     ppg_reset();
     sleep_core_init();
+
+    // Seed the RTC if it powered up unset, so the clock ticks.
+    pcf85063_datetime_t seed_check;
+    if (pcf85063_get(&seed_check) != ESP_OK || !pcf85063_time_valid(&seed_check)) {
+        const pcf85063_datetime_t seed = {
+            .year = 2026, .month = 7, .day = 2, .dotw = 4,
+            .hour = 12, .min = 0, .sec = 0,
+        };
+        pcf85063_set(&seed);
+        ESP_LOGW(TAG, "RTC unset — seeded to 2026-07-02 12:00:00");
+    }
 
     ESP_LOGI(TAG, "sensor task running on core %d", xPortGetCoreID());
 
     for (;;) {
-        // TODO(phase1-2):
-        //   1. drain MAX3010x FIFO -> ppg_process() -> sleep_core_add_beat()
-        //   2. read actigraphy activity
-        //   3. on each 30 s boundary: sleep_core_close_epoch() and persist to SD
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Phase-1 bring-up: read the onboard chips and push a live readout.
+        // TODO(phase1-2): drain MAX3010x FIFO -> ppg_process() -> sleep_core;
+        // accumulate 30 s epochs and persist to SD.
+        char timebuf[16] = "--:--:--";
+        ui_status_t st = { .time_str = timebuf, .accel_g = 0.0f, .batt_pct = -1 };
+
+        pcf85063_datetime_t t;
+        if (pcf85063_get(&t) == ESP_OK) {
+            snprintf(timebuf, sizeof timebuf, "%02u:%02u:%02u",
+                     (unsigned)t.hour, (unsigned)t.min, (unsigned)t.sec);
+        }
+
+        float x, y, z;
+        if (actigraphy_read_accel_g(&x, &y, &z) == ESP_OK) {
+            st.accel_g = sqrtf(x * x + y * y + z * z);
+        }
+
+        pmu_status_t p;
+        if (pmu_read(&p) == ESP_OK) {
+            st.batt_pct = p.batt_pct;
+            st.vbat_mv  = p.vbat_mv;
+            st.charging = p.charging;
+            st.vbus     = p.vbus_present;
+        }
+
+        // Throttled serial echo (~every 5 s) for off-screen verification.
+        static int tick = 0;
+        if ((tick++ % 10) == 0) {
+            ESP_LOGI(TAG, "readout: t=%s accel=%dmg batt=%d%% vbat=%dmV %s",
+                     timebuf, (int)(st.accel_g * 1000.0f), st.batt_pct,
+                     st.vbat_mv, st.charging ? "CHG" : (st.vbus ? "USB" : "BAT"));
+        }
+
+        ui_set_status(&st);
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -77,5 +125,5 @@ void app_main(void)
 
     // UI on core 0, sensing pinned to core 1.
     xTaskCreatePinnedToCore(ui_task,     "ui",     6144, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(sensor_task, "sensor", 6144, NULL, 6, NULL, 1);
+    xTaskCreatePinnedToCore(sensor_task, "sensor", 8192, NULL, 6, NULL, 1);
 }
