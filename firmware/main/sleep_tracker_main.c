@@ -114,12 +114,18 @@ static void active_poll(void)
 
     if ((slow++ % 25) == 0) {   // ~every 500 ms (loop is ~20 ms)
         char timebuf[16] = "--:--:--";
-        ui_status_t st = { .time_str = timebuf, .accel_g = 0.0f, .batt_pct = -1 };
+        char datebuf[16] = "";
+        ui_status_t st = { .time_str = timebuf, .date_str = datebuf, .accel_g = 0.0f, .batt_pct = -1 };
 
         pcf85063_datetime_t t;
         if (pcf85063_get(&t) == ESP_OK) {
+            static const char *dow[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+            static const char *mon[13] = { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
             snprintf(timebuf, sizeof timebuf, "%02u:%02u:%02u",
                      (unsigned)t.hour, (unsigned)t.min, (unsigned)t.sec);
+            snprintf(datebuf, sizeof datebuf, "%s  %s %u",
+                     dow[t.dotw % 7], mon[t.month <= 12 ? t.month : 0], (unsigned)t.day);
         }
 
         float x, y, z;
@@ -132,6 +138,7 @@ static void active_poll(void)
         st.hr_bpm = (int)(v.hr_bpm + 0.5f);
         st.spo2   = (int)(v.spo2_pct + 0.5f);
         st.hrv_ms = (int)(v.rmssd_ms + 0.5f);
+        st.sqi_pct = (int)(v.sqi * 100.0f + 0.5f);
 
         pmu_status_t p;
         if (pmu_read(&p) == ESP_OK) {
@@ -291,6 +298,8 @@ static void sensor_task(void *arg)
                 sleep_core_service();           // apply the stop (closes the SD log)
                 max30102_shutdown(false);       // re-wake PPG for the live ACTIVE UI
                 power_exit_tracking();
+                ui_display_wake();              // clear any manual display-sleep so
+                                               // ACTIVE never resumes behind the overlay
                 tracking = false;
                 s_ppg_rate = 0;                 // force the ACTIVE duty-cycle to reconfigure
                 ESP_LOGI(TAG, "VBUS present -> stop tracking");

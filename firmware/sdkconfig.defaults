@@ -45,6 +45,18 @@ CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP=3
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 
+# --- LVGL: the watch UI needs larger Montserrat sizes than the default 14 (big
+# clock / score / HR hero), and the C-lib allocator instead of the fixed 64 KB
+# builtin pool (the ~200-widget UI exhausts it mid-build -> lv_malloc NULL ->
+# lv_obj_add_style hang). Choice/aggregate symbols: after editing this file, run
+# `rm firmware/sdkconfig.esp32s3-amoled` so they take effect on the next build. ---
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_USE_CLIB_MALLOC=y
+
 # --- FreeRTOS ---
 CONFIG_FREERTOS_HZ=1000
 

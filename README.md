@@ -14,6 +14,7 @@ A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](ht
 | **[FEATURES.md](FEATURES.md)** | Prioritized feature list (P0 core → P2 stretch → HW add-ons) | Reference — the backlog |
 | **[INTEGRATION.md](INTEGRATION.md)** | Long-term Home Assistant + CPAP integration design | Long-term reference — not needed for Phases 0–4 |
 | **[datasheets/](datasheets/)** | Datasheets for the board's main ICs + the project sensors, with the I²C bus map | Hardware reference — bring-up, wiring, driver work |
+| **[docs/](docs/)** | Design references — the interactive [watch-UI mockup](docs/watch-ui-mockup.html) (all screens at the real 368×448) | UI / design reference |
 
 ## Development stages at a glance
 
@@ -25,6 +26,6 @@ The project is built in staged milestones (full detail + exit criteria in [PLAN.
 - **Phase 2 — Recording pipeline:** records a full 8-hour night to microSD on battery.
 - **Phase 2.5 — Body-sensor network:** a paired torso WT9011DCL logs authoritative sleep position all night.
 - **Phase 3 — Sleep scoring:** hypnogram + score, position-resolved summaries (optional HRV check against ECG).
-- **Phase 4 — UI polish:** watch face, morning report, settings, 7-night history.
+- **Phase 4 — UI polish:** watch face, morning report, settings, 7-night history. *(Watch UI shell built & running on hardware — an 11-tile swipeable LVGL app with live watch/vitals/tracking + a PPG-debug tile, display-sleep + double-tap-to-wake; report/history tiles show a sample night pending on-device scoring. Interactive design mockup: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).)*
 - **Phase 5 — Stretch:** smart alarm, BLE/companion sync, respiratory rate, snore detection.
 - **v3+ — Integration:** Home Assistant + CPAP combined summary (separate track, see [INTEGRATION.md](INTEGRATION.md) §7).

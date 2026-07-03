@@ -4,6 +4,8 @@ ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-A
 
 **Status (Phases 0–1 done; Phase 2 recording bench-validated on hardware):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The Phase 1 sensor + PPG bodies are now live on hardware — the PCF85063 RTC ticks, the QMI8658 reads ~1 g at rest, the AXP2101 reports battery, and the external MAX30102 yields live heart rate (~81 bpm) and SpO2 (98–99%). The remaining UI/recording/sync *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**). **Phase 2 recording is now bench-validated on hardware:** the microSD card mounts, a session opens the log file, continuous 30 s epochs are written to the card, and light-sleep engages in TRACKING (verified on **ESP-IDF v6.0.2**).
 
+**Phase 4 update — watch UI on hardware:** the UI is now an **11-tile swipeable LVGL app** (`components/ui`): watch face, live vitals (HR / SpO2 / real HRV / SQI + a **live PPG pulse waveform**), tracking clock, morning-report (score / hypnogram / heart & O2), position, history, alarm, a scrollable settings list, and a **PPG-debug tile** (the tuning graph + rate/HR/HRV/SQI readout, kept from the pre-watch-UI display) — plus **display-sleep + double-tap-to-wake**. The watch / live / tracking / debug tiles read live sensors; report / position / history render a sample night pending on-device scoring + Phase 2.5. Interactive design reference: [`../docs/watch-ui-mockup.html`](../docs/watch-ui-mockup.html).
+
 ## Build / flash / monitor
 
 This project builds under **PlatformIO** (recommended, via VS Code) *or* native **ESP-IDF** — both use the same `main/` + `components/` tree.
@@ -21,9 +23,13 @@ pio device monitor         # serial monitor @ 115200
 ```
 
 - `platformio.ini` pins `platform = espressif32@6.11.0` (**ESP-IDF 5.4.1 / GCC 14.2**), `board = esp32-s3-devkitc-1`, 16 MB flash, and the `partitions.csv` table; PSRAM/CPU/PM come from `sdkconfig.defaults`. **Do not bump to platform 7.0.x** (IDF 6.0.1 / GCC 15.2) — it hits a compiler ICE building ESP-IDF's `esp_lcd` RGB driver.
-- Two build workarounds are baked in and required to compile the managed BSP + `esp_lcd` on this toolchain:
+- Build workarounds baked in and required to compile the managed BSP + `esp_lcd` on this toolchain:
   - `sdkconfig.defaults` sets `CONFIG_COMPILER_OPTIMIZATION_SIZE=y` (`-Os`) — the default `-Og` triggers a GCC 14.2 internal-compiler-error (IRA segfault) in `esp_lcd_panel_rgb.c`.
   - the top-level `CMakeLists.txt` appends `-Wno-error=format` — the managed Waveshare BSP logs a `uint32_t` with `%02X`, fatal under `-Werror=format`.
+- LVGL config the watch UI depends on (also in `sdkconfig.defaults`):
+  - larger fonts `CONFIG_LV_FONT_MONTSERRAT_12/20/28/36/48=y` — the default is only 14 (a big clock/score needs these, else `lv_font_montserrat_48 undeclared`).
+  - `CONFIG_LV_USE_CLIB_MALLOC=y` — the default builtin LVGL pool is only 64 KB (`CONFIG_LV_MEM_SIZE_KILOBYTES=64`) and the ~200-widget UI **exhausts it mid-build** → `lv_malloc` returns NULL and `lv_obj_add_style` hangs → task-watchdog reboot loop. CLIB malloc routes LVGL to the system heap (and frees ~64 KB of static RAM).
+  - ⚠️ these are choice/dependency-gated Kconfig symbols — after editing `sdkconfig.defaults`, run **`rm firmware/sdkconfig.esp32s3-amoled`** and rebuild so they actually take effect (a plain rebuild silently keeps the old values).
 - The board's USB-C is the S3 **native USB-Serial/JTAG** (shows up as **COM6** here) — used for both flashing and logs (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`). If upload can't auto-enter download mode, hold **BOOT**, tap **RESET**, release BOOT, and retry.
 - Update `upload_port`/`monitor_port` in `platformio.ini` if the board enumerates on a different COM port.
 
@@ -58,7 +64,7 @@ firmware/
     ├── actigraphy/           # QMI8658 wrist activity counts           [phase1]
     ├── bodynet/              # BLE central: WT9011DCL body sensors+H10 [phase2.5]
     ├── sleep_core/           # epoch record, session SM, HRV, scoring  [phase2-3]
-    ├── ui/                   # LVGL screens (on board's display)       [phase0/4]
+    ├── ui/                   # LVGL watch UI: 11-tile swipeable app     [phase0/4]
     └── sync/                 # BLE GATT log-pull (P5) → MQTT to HA+CPAP [phase5/integration]
 ```
 

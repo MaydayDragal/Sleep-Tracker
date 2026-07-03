@@ -69,6 +69,8 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 
 ## 6. Watch & Daily UX
 
+> **Status (Phase 4):** an 11-tile swipeable LVGL watch UI is built and running on hardware — watch face, live vitals (with a live PPG waveform + real HRV/SQI), tracking, morning report, position, history, alarm, settings, and a PPG-debug tile — plus display-sleep + double-tap-to-wake. Live tiles read real sensors; report/history render a sample night pending on-device scoring. Interactive mockup: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
+
 - **[P0] Watch face** — time, date, battery, last night's score
 - **[P0] Tracking screen** — minimal dimmed clock during sleep, "recording" indicator
 - **[P0] Morning report** — score card → hypnogram → HR/SpO2 charts, swipeable
