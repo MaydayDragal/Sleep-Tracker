@@ -217,11 +217,11 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 ### Phase 2 — Recording pipeline
 **Goal:** record a full night to microSD on battery (with an optional, power-permitting nightly HRV capture mode).
-- [ ] Epoch assembler + ring buffer + SD writer (append-only, crash-safe).
-- [ ] Night session state machine (manual start/stop first; auto-detect later).
-- [ ] Power work: display off, light sleep between sensor windows, duty-cycle scheduler. Measure real overnight battery drain.
-- [ ] (Optional, power-permitting) Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of short duty-cycle bursts, and log the accepted-IBI series to SD. Enable only if the measured overnight drain (from the power work above) leaves room.
-- **Exit criteria:** device records a full 8-hour night on battery and the log opens cleanly in a notebook/spreadsheet. (If HRV is enabled, the IBI series should be complete enough for per-cycle RMSSD — but HRV is optional, so this doesn't block the phase.)
+- [x] Epoch assembler + SD writer (append-only CSV, crash-safe: fsync-per-epoch, torn-tail-tolerant; `events.log` flight recorder; card-pull remount+resume). *Code done, compiles, reader bench-tested; not yet run on hardware.*
+- [x] Night session state machine (manual start/stop). **Trigger = VBUS**: unplug from charger ⇒ start, plug in ⇒ stop (debounced). A `sleep_core_request_start/stop()` seam is left for a future UI button; auto-detect later.
+- [x] Power work: display off + LVGL-port stop + UI-task gate during a distinct TRACKING mode, automatic tickless light-sleep armed (`esp_pm_configure`), MAX30102 duty-cycled (45 s PPG window / 5 min). **Wake-on-motion dropped** — the QMI8658 INT is not routed on this board; timer-wake only. *Overnight drain still UNMEASURED (spike S4).*
+- [ ] (Optional, power-permitting) Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of short duty-cycle bursts, and log the accepted-IBI series to SD. *Scaffolded as a separate binary side-file; default off.* Enable only if the measured overnight drain leaves room.
+- **Exit criteria:** device records a full 8-hour night on battery and the log opens cleanly in a notebook/spreadsheet. *The "opens cleanly" half is met (`tools/read_night.py`). The "8 h on battery" half is **hardware-blocked** pending: flash + microSD bench run, the SDMMC-PM-lock check (does auto-light-sleep actually engage?), confirming a Li-Po is on the header (gauge reads 0%), and spikes S3/S4 (SD throughput + overnight mAh via an external coulomb counter).*
 
 ### Phase 2.5 — Body-sensor network (WT9011DCL over BLE)
 **Goal:** pair external BLE body sensors to get authoritative sleep position (back/left/right/belly).
@@ -319,4 +319,6 @@ Sleep-Tracker/
 
 **Status (Phases 0–1 done on hardware; PPG live):** the firmware boots on real hardware — dual-core task architecture running, all onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`, plus the FT3168 touch at `0x38` once its reset is released), the CO5300 AMOLED + LVGL come up, and **touch works** (verified with an on-screen tap counter). Board bring-up is delegated to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets on the TCA9554 (a gap in the vendor BSP). The **RTC (PCF85063), IMU accel (QMI8658), and battery (AXP2101)** now read live over I2C — verified on a diagnostic screen (clock ticking, ~1 g at rest, ~4.1 V / charging) — via hand-rolled register-level drivers (`components/rtc`, `components/pmu`, `components/actigraphy`), since the managed chip components require IDF ≥5.5 and we're on 5.4. The PPG driver and first-pass PPG/DSP pipeline now run live on hardware (live HR + SpO2 via the external MAX30102 at `0x57`); only the epoch-assembler and scoring bodies remain stubbed and tagged `TODO(phaseN)`.
 
-**Next steps:** (1) epoch assembler + crash-safe microSD logging (Phase 2 recording); (2) power work — display-off light-sleep + wake-on-motion + duty-cycle scheduler (Phase 2).
+**Phase 2 (recording) update:** the epoch assembler, night-session state machine (VBUS-triggered), crash-safe CSV SD logger (`components/sd_logger`), and the power/duty-cycle TRACKING mode (`components/power`) are now **written, compiling, and adversarially reviewed**, with an offline reader (`tools/read_night.py`). Wake-on-motion was dropped (QMI8658 INT unrouted; timer-wake instead). **Not yet flashed.**
+
+**Next steps:** (1) flash + a microSD bench run to confirm continuous 30 s epochs and light-sleep engagement (SDMMC-PM-lock check); (2) confirm a Li-Po on the header and run spikes S3/S4 (SD throughput + overnight mAh on an external coulomb counter) to close the "8 h on battery" exit gate; (3) Phase 2.5 body sensors / Phase 3 scoring.

@@ -2,6 +2,7 @@
 #include "bsp/esp-bsp.h"   // managed Waveshare BSP (waveshare/esp32_s3_touch_amoled_1_8)
 #include "bsp/touch.h"     // bsp_touch_new()
 #include "esp_lcd_touch.h" // esp_lcd_touch_handle_t (also enables esp_lvgl_port's touch API)
+#include "esp_lcd_co5300.h" // esp_lcd_panel_co5300_set_brightness()
 #include "esp_lvgl_port.h"
 #include "esp_io_expander.h"
 #include "freertos/FreeRTOS.h"
@@ -10,6 +11,11 @@
 #include "esp_log.h"
 
 static const char *TAG = "board";
+
+// Retained so the display can be blanked/unblanked after bring-up (display-off
+// tracking). board_display_start() sets it.
+static esp_lcd_panel_handle_t s_panel;
+static bool s_sd_mounted;
 
 esp_err_t board_init(void)
 {
@@ -55,7 +61,40 @@ esp_err_t board_sdcard_mount(void)
 {
     // Mount point is fixed by the BSP's Kconfig (CONFIG_BSP_SD_MOUNT_POINT,
     // default "/sdcard"). Returns an error (harmlessly) if no card is inserted.
-    return bsp_sdcard_mount();
+    esp_err_t err = bsp_sdcard_mount();
+    if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {   // INVALID_STATE = already mounted
+        s_sd_mounted = true;
+        return ESP_OK;
+    }
+    s_sd_mounted = false;
+    return err;
+}
+
+esp_err_t board_sdcard_unmount(void)
+{
+    esp_err_t err = bsp_sdcard_unmount();
+    s_sd_mounted = false;
+    return err;
+}
+
+esp_err_t board_sdcard_remount(void)
+{
+    // Tear down the (possibly stale) mount unconditionally: after a physical card
+    // pull the VFS/FATFS registration lingers, so a plain mount would just report
+    // "already mounted" without re-initializing the card.
+    bsp_sdcard_unmount();   // best-effort; the card may already be gone
+    s_sd_mounted = false;
+    return board_sdcard_mount();
+}
+
+bool board_sdcard_mounted(void)
+{
+    return s_sd_mounted;
+}
+
+void board_sdcard_mark_lost(void)
+{
+    s_sd_mounted = false;   // a write failed; force a remount on the next attempt
 }
 
 // The FT3168 touch and the CO5300 reset both hang off the TCA9554 IO-expander,
@@ -91,6 +130,7 @@ esp_err_t board_display_start(void)
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_panel_io_handle_t io = NULL;
     ESP_RETURN_ON_ERROR(bsp_display_new(&disp_hw, &panel, &io), TAG, "bsp_display_new failed");
+    s_panel = panel;   // retain for board_display_set_on()
 
     const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "lvgl_port_init failed");
@@ -138,4 +178,32 @@ bool board_display_lock(uint32_t timeout_ms)
 void board_display_unlock(void)
 {
     lvgl_port_unlock();
+}
+
+void board_display_set_on(bool on)
+{
+    if (s_panel == NULL) {
+        return;
+    }
+    // The AMOLED has no backlight pin; brightness is a panel command (CO5300).
+    // Take the LVGL lock so this core-1 command can't collide on the shared
+    // QSPI IO with an in-flight flush from the esp_lvgl_port task (core 0).
+    bool locked = board_display_lock(200);
+    esp_err_t err = esp_lcd_panel_co5300_set_brightness(s_panel, on ? 100 : 0);
+    if (locked) {
+        board_display_unlock();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "display_set_on(%d) failed: %s", (int)on, esp_err_to_name(err));
+    }
+}
+
+void board_lvgl_stop(void)
+{
+    lvgl_port_stop();     // pauses the esp_lvgl_port timer task (a periodic waker)
+}
+
+void board_lvgl_resume(void)
+{
+    lvgl_port_resume();
 }
