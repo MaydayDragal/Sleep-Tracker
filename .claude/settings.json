@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 10,
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" 2>/dev/null; c=$(git diff HEAD --name-only 2>/dev/null); if echo \"$c\" | grep -q '^firmware/components/ui/' && ! echo \"$c\" | grep -q '^docs/watch-ui-mockup\\.html'; then echo '{\"systemMessage\":\"Reminder: components/ui changed but docs/watch-ui-mockup.html was not updated \\u2014 sync the mockup and commit it (see CLAUDE.md).\"}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
