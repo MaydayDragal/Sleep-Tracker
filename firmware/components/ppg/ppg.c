@@ -3,12 +3,22 @@
 #include <math.h>
 #include <string.h>
 
-// PPG pipeline (Phase 1 + accuracy pass): DC removal (high-pass) followed by a
-// 1-pole low-pass => a ~0.16-5 Hz band-pass; an adaptive-threshold peak detector
-// on the filtered IR channel for HR, with inter-beat-interval plausibility
-// gating so a spurious/missed beat can't yank the displayed rate; and a rough
-// ratio-of-ratios SpO2. The band-passed waveform is retained (decimated to ~100
-// Hz) in a ring buffer for the on-device debug graph (ppg_copy_waveform).
+// PPG pipeline (Phase 1 + accuracy passes):
+//   raw -> median-3 despike (kills isolated sensor glitches, edge-preserving)
+//       -> DC removal (high-pass) + 2-pole low-pass  => a ~0.16-5 Hz band-pass
+//       -> PPG-only motion/artifact detection (suppresses beats + drops quality
+//          during large non-cardiac excursions; the IMU version comes later)
+//       -> adaptive-threshold peak detector with IBI plausibility gating
+//       -> a real signal-quality index (perfusion x amplitude-consistency x
+//          IBI-regularity) that gates whether the HR is trustworthy
+//       -> rough ratio-of-ratios SpO2.
+// The band-passed waveform is retained (decimated to ~100 Hz) in a ring buffer
+// for the on-device debug graph (ppg_copy_waveform).
+//
+// A pure linear-filter swap (e.g. a Butterworth band-pass) was evaluated offline
+// against captured data and did NOT beat the adaptive detector — so noise
+// reduction here is despike (removes what a filter can't) + an SQI/artifact gate
+// (don't emit HR you can't trust), not a fancier band-pass.
 //
 // All the filter coefficients are derived from PPG_FS_HZ at ppg_reset(), so the
 // sample rate is the single knob — change it here + the driver's SPO2_CONFIG +
@@ -20,9 +30,17 @@
 #define IBI_MAX_S        2.0f       // max beat spacing (=> min 30 bpm)
 #define PEAK_FRAC        0.5f       // a beat must reach this fraction of the tracked
                                     // systolic amplitude (rejects the dicrotic notch)
-#define LP_FC_HZ         5.0f       // band-pass low-pass corner
+#define LP_FC_HZ         6.0f       // band-pass low-pass corner (2-pole cascade)
 #define HP_FC_HZ         0.16f      // baseline (high-pass) corner
 #define WAVE_TARGET_HZ   100.0f     // decimate the graph waveform to ~this rate
+
+// --- Noise reduction / signal quality ---
+#define ART_EXCURSION    4.0f       // |band-passed| beyond this x tracked amplitude => motion
+#define ART_SLEW         2.5f       // per-sample jump beyond this x amplitude => motion
+#define ART_HOLD_S       0.4f       // suppress beats + decay quality this long after motion
+#define PI_FULL          0.004f     // perfusion index (ACpp/DC) giving full quality (fingertip ~0.9%)
+#define PI_MIN           0.0004f    // perfusion at/below which the perfusion term -> 0
+#define SQI_VALID        0.3f       // vitals.valid requires the smoothed SQI above this
 
 static struct {
     float    dc_ir, dc_red;         // slow baselines (the high-pass stage)
@@ -37,12 +55,31 @@ static struct {
     float    ac_ir_max, ac_ir_min, ac_red_max, ac_red_min;  // per-beat extremes
     bool     finger;
     bool     seeded;
+    float    lp2;                   // second low-pass pole (=> 12 dB/oct roll-off)
+    float    med_ir1, med_ir2;      // raw median-3 despike history (IR)
+    float    med_red1, med_red2;    // raw median-3 despike history (RED)
+    int      art_hold;              // motion-artifact suppression counter (samples)
+    float    sqi;                   // smoothed 0..1 signal-quality index
     // fs-derived coefficients (set in ppg_reset)
     float    a_lp, a_dc, a_thr, a_pkdecay;
     int      wave_decim, wave_dcount;
     int32_t  wave[PPG_WAVE_N];      // band-passed waveform ring (on-device graph)
     uint32_t wave_head;             // total decimated samples written
 } S;
+
+// Median of three: returns the middle value (sum minus the extremes). A 3-tap
+// median removes isolated single-sample spikes while leaving pulse edges intact.
+static inline float med3f(float a, float b, float c)
+{
+    const float mx = fmaxf(a, fmaxf(b, c));
+    const float mn = fminf(a, fminf(b, c));
+    return a + b + c - mx - mn;
+}
+
+static inline float clampf(float v, float lo, float hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
 
 void ppg_reset(void)
 {
@@ -62,14 +99,23 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
     bool beat = false;
 
     for (size_t i = 0; i < n; i++) {
-        const float ir  = (float)samples[i].ir;
-        const float red = (float)samples[i].red;
+        const float ir_raw  = (float)samples[i].ir;
+        const float red_raw = (float)samples[i].red;
 
         if (!S.seeded) {
-            S.dc_ir = ir;
-            S.dc_red = red;
+            S.med_ir1  = S.med_ir2  = ir_raw;
+            S.med_red1 = S.med_red2 = red_raw;
+            S.dc_ir = ir_raw;
+            S.dc_red = red_raw;
             S.seeded = true;
         }
+
+        // Median-3 despike on the raw channels (removes lone glitch samples
+        // before they reach the filters/detector).
+        const float ir  = med3f(ir_raw,  S.med_ir1,  S.med_ir2);
+        const float red = med3f(red_raw, S.med_red1, S.med_red2);
+        S.med_ir2  = S.med_ir1;  S.med_ir1  = ir_raw;
+        S.med_red2 = S.med_red1; S.med_red1 = red_raw;
         // High-pass: track the DC baseline; adapt fast on large steps (finger
         // on/off) so a slow baseline doesn't create a transient that poisons
         // peak_amp.
@@ -82,18 +128,38 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         const float ac_ir  = ir  - S.dc_ir;
         const float ac_red = red - S.dc_red;
 
-        // Low-pass the AC => a clean band-passed pulse.
-        S.lp += (ac_ir - S.lp) * S.a_lp;
+        // Two cascaded 1-pole low-passes => a 12 dB/oct roll-off (sharper HF-noise
+        // rejection than a single pole) for a clean band-passed pulse.
+        S.lp  += (ac_ir - S.lp)  * S.a_lp;
+        S.lp2 += (S.lp  - S.lp2) * S.a_lp;
+        const float lp = S.lp2;   // detector/graph operate on the 2-pole output
 
         // Retain the filtered sample for the on-device debug graph (decimated so
         // the window duration is fs-independent).
         if (++S.wave_dcount >= S.wave_decim) {
             S.wave_dcount = 0;
-            S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)S.lp;
+            S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)lp;
             S.wave_head++;
         }
 
-        S.thr += (fabsf(S.lp) - S.thr) * S.a_thr;
+        // PPG-only motion/artifact detection: a cardiac pulse's band-passed
+        // excursion stays bounded near the tracked systolic amplitude and can't
+        // slew arbitrarily fast. A large excursion or step is motion — hold off
+        // beat acceptance and let quality decay until it settles.
+        const float dlp = lp - S.lp_prev;
+        if (S.finger && S.peak_amp > 50.0f &&
+            (fabsf(lp)  > ART_EXCURSION * S.peak_amp ||
+             fabsf(dlp) > ART_SLEW      * S.peak_amp)) {
+            S.art_hold = (int)(ART_HOLD_S * PPG_FS_HZ);
+        } else if (S.art_hold > 0) {
+            S.art_hold--;
+        }
+        const bool artifact = S.art_hold > 0;
+        if (artifact) {
+            S.sqi += (0.0f - S.sqi) * 0.02f;   // quality falls during motion
+        }
+
+        S.thr += (fabsf(lp) - S.thr) * S.a_thr;
         S.peak_amp *= S.a_pkdecay;   // slow decay so a stale/too-high amplitude self-heals
 
         // Track AC extremes for SpO2 (reset each accepted beat).
@@ -107,8 +173,9 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         // Peak = the previous filtered sample was a local max, above the noise
         // floor AND a strong fraction of the tracked systolic amplitude (so the
         // smaller dicrotic notch mid-cycle doesn't register as a second beat).
-        if (S.finger &&
-            S.lp_prev > S.lp && S.lp_prev >= S.lp_prev2 &&
+        // Suppressed entirely while a motion artifact is in progress.
+        if (!artifact && S.finger &&
+            S.lp_prev > lp && S.lp_prev >= S.lp_prev2 &&
             S.lp_prev > S.thr &&
             S.lp_prev > PEAK_FRAC * S.peak_amp) {
             const int peak_idx = (int)S.idx - 1;
@@ -123,16 +190,28 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
                     // Plausibility gate: a single IBI that implies an HR far from
                     // the running rate is almost always a missed or spurious beat
                     // — keep the detector synced but don't let it move the reading.
-                    if (S.hr_bpm == 0.0f ||
-                        (hr > S.hr_bpm * 0.6f && hr < S.hr_bpm * 1.6f)) {
+                    const bool plausible = (S.hr_bpm == 0.0f) ||
+                        (hr > S.hr_bpm * 0.6f && hr < S.hr_bpm * 1.6f);
+                    if (plausible) {
                         S.hr_bpm = (S.hr_bpm == 0.0f) ? hr
                                  : S.hr_bpm + (hr - S.hr_bpm) * 0.2f;
                     }
+
+                    // Per-beat signal quality = perfusion x amplitude-consistency
+                    // x IBI-regularity (all must hold), smoothed across beats.
+                    const float ir_pp  = S.ac_ir_max  - S.ac_ir_min;
+                    const float red_pp = S.ac_red_max - S.ac_red_min;
+                    const float pi = (S.dc_ir > 0.0f) ? ir_pp / S.dc_ir : 0.0f;
+                    const float sqi_pi  = clampf((pi - PI_MIN) / (PI_FULL - PI_MIN), 0.0f, 1.0f);
+                    const float ratio   = (S.peak_amp > 1.0f) ? S.lp_prev / S.peak_amp : 1.0f;
+                    const float sqi_amp = 1.0f - clampf(fabsf(1.0f - ratio), 0.0f, 1.0f);
+                    const float sqi_reg = plausible ? 1.0f : 0.3f;
+                    const float sqi_beat = sqi_pi * sqi_amp * sqi_reg;
+                    S.sqi += (sqi_beat - S.sqi) * 0.3f;
+
                     S.peak_amp += (S.lp_prev - S.peak_amp) * 0.2f;
 
                     // Rough SpO2: R = (ACred/DCred)/(ACir/DCir).
-                    const float ir_pp  = S.ac_ir_max  - S.ac_ir_min;
-                    const float red_pp = S.ac_red_max - S.ac_red_min;
                     if (S.dc_ir > 0 && S.dc_red > 0 && ir_pp > 0 && red_pp > 0) {
                         const float r = (red_pp / S.dc_red) / (ir_pp / S.dc_ir);
                         float spo2 = 110.0f - 25.0f * r;
@@ -143,8 +222,8 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
 
                     if (out_beat) {
                         out_beat->ibi_ms = ibi * 1000.0f;
-                        out_beat->cls    = PPG_BEAT_NORMAL;
-                        out_beat->sqi    = 1.0f;
+                        out_beat->cls    = plausible ? PPG_BEAT_NORMAL : PPG_BEAT_ARTIFACT;
+                        out_beat->sqi    = S.sqi;
                         out_beat->t_us   = (uint64_t)esp_timer_get_time();
                     }
                     beat = true;
@@ -162,11 +241,12 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         if (!S.finger) {
             S.hr_bpm = 0;
             S.spo2 = 0;
+            S.sqi = 0;
             S.last_beat_idx = -1;
         }
 
         S.lp_prev2 = S.lp_prev;
-        S.lp_prev  = S.lp;
+        S.lp_prev  = lp;
     }
 
     return beat;
@@ -177,8 +257,10 @@ ppg_vitals_t ppg_current_vitals(void)
     ppg_vitals_t v = {
         .hr_bpm   = S.hr_bpm,
         .spo2_pct = S.spo2,
-        .sqi      = S.finger ? 1.0f : 0.0f,
-        .valid    = S.finger && S.hr_bpm > 30.0f && S.hr_bpm < 220.0f,
+        .sqi      = S.sqi,
+        .finger   = S.finger,
+        .valid    = S.finger && S.hr_bpm > 30.0f && S.hr_bpm < 220.0f &&
+                    S.sqi > SQI_VALID,
     };
     return v;
 }

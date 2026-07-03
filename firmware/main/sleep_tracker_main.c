@@ -103,7 +103,7 @@ static void active_poll(void)
         }
 
         ppg_vitals_t v = ppg_current_vitals();
-        st.finger = v.sqi > 0.5f;
+        st.finger = v.finger;
         st.hr_bpm = (int)(v.hr_bpm + 0.5f);
         st.spo2   = (int)(v.spo2_pct + 0.5f);
 
@@ -116,9 +116,9 @@ static void active_poll(void)
         }
 
         if ((echo++ % 10) == 0) {   // ~every 5 s
-            ESP_LOGI(TAG, "readout: t=%s accel=%dmg hr=%d spo2=%d finger=%d batt=%d%% %s",
+            ESP_LOGI(TAG, "readout: t=%s accel=%dmg hr=%d spo2=%d finger=%d sqi=%.2f%s batt=%d%% %s",
                      timebuf, (int)(st.accel_g * 1000.0f), st.hr_bpm, st.spo2,
-                     st.finger, st.batt_pct,
+                     st.finger, v.sqi, v.valid ? "" : " (untrusted)", st.batt_pct,
                      st.charging ? "CHG" : (st.vbus ? "USB" : "BAT"));
         }
 

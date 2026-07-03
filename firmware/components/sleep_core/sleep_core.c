@@ -15,7 +15,6 @@ static const char *TAG = "sleep_core";
 #define MOTION_MAG_THRESH   0.05f   // |Δ|accel|| (g) above this => "moving" sample
 #define MOTION_EPOCH_FRAC   0.30f   // >30 % moving samples => MOTION flag
 #define ACT_SCALE           1000.0f // activity count = Σ|Δmag| * this, clamped u16
-#define FINGER_SQI_MIN      0.5f    // per-vitals SQI above this => finger present
 #define HRV_MIN_BEATS       20      // min accepted NORMAL IBIs for a per-epoch RMSSD
 #define HRV_MIN_ACCEPT_PCT  70      // and min beat-acceptance for that RMSSD
 #define HRV_IBI_CAP         64      // ring cap for per-epoch accepted IBIs
@@ -167,7 +166,7 @@ void sleep_core_feed_vitals(const ppg_vitals_t *v)
     }
     acc.saw_ppg = true;      // a vitals sample implies the PPG window is running
     acc.vitals_n++;
-    if (v->sqi > FINGER_SQI_MIN) {
+    if (v->finger) {         // wrist-on is finger presence, independent of signal quality
         acc.finger_n++;
     }
     if (v->valid && v->hr_bpm > 0.0f) {

@@ -29,8 +29,9 @@ typedef struct {
 typedef struct {
     float hr_bpm;
     float spo2_pct;
-    float sqi;     // 0..1
-    bool  valid;   // false until enough clean signal has accumulated
+    float sqi;     // 0..1 smoothed signal-quality index (perfusion x consistency)
+    bool  finger;  // sensor is covered (DC above the finger threshold)
+    bool  valid;   // finger + plausible HR + SQI above the trust floor
 } ppg_vitals_t;
 
 // Reset filter/detector state (call when (re)starting acquisition).
