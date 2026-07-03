@@ -36,6 +36,11 @@ static const char *TAG = "main";
 // ~120 ms (fast start); in TRACKING it is one duty wake (~30 s), a deliberate stop.
 #define VBUS_DEBOUNCE 2
 
+// Debug: stream every raw PPG sample as "R,<ir>,<red>" over the console while in
+// ACTIVE mode, for offline analysis (tools/capture_ppg.py -> tools/analyze_ppg.py).
+// Set to 0 to silence. Not emitted during TRACKING (the console is idle then).
+#define PPG_RAW_STREAM 1
+
 // Set by the UI task once the display is up, so the sensor task never drives a
 // mode transition (display off / LVGL stop) before LVGL exists.
 static volatile bool s_display_ready = false;
@@ -50,11 +55,18 @@ static void active_poll(void)
     if (max30102_read_fifo(fifo, 32, &n) == ESP_OK && n > 0) {
         ppg_beat_t beat;
         ppg_process(fifo, n, &beat);
+#if PPG_RAW_STREAM
+        for (size_t k = 0; k < n; k++) {
+            printf("R,%lu,%lu\n", (unsigned long)fifo[k].ir, (unsigned long)fifo[k].red);
+        }
+#endif
         if ((raw++ % 8) == 0) {   // raw echo ~every 1 s — proves the PPG responds
             ESP_LOGI(TAG, "ppg raw: ir=%lu red=%lu (n=%u)",
                      (unsigned long)fifo[0].ir, (unsigned long)fifo[0].red, (unsigned)n);
         }
     }
+
+    ui_update_waveform();   // refresh the live PPG graph (~8 Hz)
 
     if ((slow++ % 4) == 0) {   // ~every 480 ms
         char timebuf[16] = "--:--:--";

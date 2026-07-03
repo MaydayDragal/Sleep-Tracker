@@ -3,10 +3,13 @@
 #include <math.h>
 #include <string.h>
 
-// First-pass PPG pipeline (Phase 1 bring-up): DC removal + light smoothing, an
-// adaptive-threshold peak detector on the IR channel for HR, and a rough
-// ratio-of-ratios SpO2 estimate. This is enough to show a live, finger-responsive
-// HR/SpO2; the HRV-grade fiducial/sub-sample work in PLAN.md §3.3 comes later.
+// PPG pipeline (Phase 1 + accuracy pass): DC removal (high-pass) followed by a
+// 1-pole low-pass => a ~0.5-4 Hz band-pass; an adaptive-threshold peak detector
+// on the filtered IR channel for HR, with inter-beat-interval plausibility
+// gating so a spurious/missed beat can't yank the displayed rate; and a rough
+// ratio-of-ratios SpO2. The band-passed waveform is retained in a ring buffer
+// for the on-device debug graph (ppg_copy_waveform). HRV-grade sub-sample
+// fiducials (PLAN.md §3.3) come later.
 
 #define PPG_FS_HZ        100.0f     // MUST match the MAX30102 sample rate
 #define FINGER_IR_MIN    30000.0f   // IR DC below this => no finger on the sensor
@@ -14,11 +17,13 @@
 #define IBI_MAX_S        2.0f       // max beat spacing (=> min 30 bpm)
 #define PEAK_FRAC        0.5f       // a beat must reach this fraction of the tracked
                                     // systolic amplitude (rejects the dicrotic notch)
+#define LP_ALPHA         0.25f      // 1-pole low-pass over the AC signal (~4 Hz @ 100 Hz)
 
 static struct {
-    float    dc_ir, dc_red;         // slow baselines
-    float    ac_prev, ac_prev2;     // smoothed AC history for peak detection
-    float    thr;                   // adaptive noise threshold (EMA of |AC|)
+    float    dc_ir, dc_red;         // slow baselines (the high-pass stage)
+    float    lp;                    // band-passed IR (DC-removed, low-passed)
+    float    lp_prev, lp_prev2;     // filtered history for peak detection
+    float    thr;                   // adaptive noise threshold (EMA of |lp|)
     float    peak_amp;              // tracked systolic-peak amplitude
     uint32_t idx;                   // running sample index
     int      last_beat_idx;         // -1 = none yet
@@ -27,6 +32,8 @@ static struct {
     float    ac_ir_max, ac_ir_min, ac_red_max, ac_red_min;  // per-beat extremes
     bool     finger;
     bool     seeded;
+    int32_t  wave[PPG_WAVE_N];      // band-passed waveform ring (on-device graph)
+    uint32_t wave_head;             // total samples written
 } S;
 
 void ppg_reset(void)
@@ -48,8 +55,9 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
             S.dc_red = red;
             S.seeded = true;
         }
-        // Track the DC baseline; adapt fast on large steps (finger on/off) so a
-        // slow baseline doesn't create a huge transient that poisons peak_amp.
+        // High-pass: track the DC baseline; adapt fast on large steps (finger
+        // on/off) so a slow baseline doesn't create a transient that poisons
+        // peak_amp.
         const float d_ir  = ir  - S.dc_ir;
         const float d_red = red - S.dc_red;
         S.dc_ir  += (fabsf(d_ir)  > 5000.0f) ? d_ir  * 0.5f : d_ir  * 0.01f;
@@ -58,8 +66,16 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
 
         const float ac_ir  = ir  - S.dc_ir;
         const float ac_red = red - S.dc_red;
-        const float ac_s   = (ac_ir + S.ac_prev + S.ac_prev2) / 3.0f;  // 3-tap smooth
-        S.thr += (fabsf(ac_s) - S.thr) * 0.01f;
+
+        // Low-pass the AC => a clean band-passed pulse (the old 3-tap average let
+        // far more high-frequency noise through).
+        S.lp += (ac_ir - S.lp) * LP_ALPHA;
+
+        // Retain the filtered sample for the on-device debug graph.
+        S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)S.lp;
+        S.wave_head++;
+
+        S.thr += (fabsf(S.lp) - S.thr) * 0.01f;
         S.peak_amp *= 0.999f;   // slow decay so a stale/too-high amplitude self-heals
 
         // Track AC extremes for SpO2 (reset each accepted beat).
@@ -70,24 +86,31 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
 
         S.idx++;
 
-        // Peak = the previous smoothed sample was a local max, above the noise
+        // Peak = the previous filtered sample was a local max, above the noise
         // floor AND a strong fraction of the tracked systolic amplitude (so the
         // smaller dicrotic notch mid-cycle doesn't register as a second beat).
         if (S.finger &&
-            S.ac_prev > ac_s && S.ac_prev >= S.ac_prev2 &&
-            S.ac_prev > S.thr &&
-            S.ac_prev > PEAK_FRAC * S.peak_amp) {
+            S.lp_prev > S.lp && S.lp_prev >= S.lp_prev2 &&
+            S.lp_prev > S.thr &&
+            S.lp_prev > PEAK_FRAC * S.peak_amp) {
             const int peak_idx = (int)S.idx - 1;
 
             if (S.last_beat_idx < 0) {
                 S.last_beat_idx = peak_idx;
-                S.peak_amp = S.ac_prev;
+                S.peak_amp = S.lp_prev;
             } else {
                 const float ibi = (peak_idx - S.last_beat_idx) / PPG_FS_HZ;
                 if (ibi >= REFRACTORY_S && ibi <= IBI_MAX_S) {
                     const float hr = 60.0f / ibi;
-                    S.hr_bpm = (S.hr_bpm == 0) ? hr : S.hr_bpm + (hr - S.hr_bpm) * 0.2f;
-                    S.peak_amp += (S.ac_prev - S.peak_amp) * 0.2f;
+                    // Plausibility gate: a single IBI that implies an HR far from
+                    // the running rate is almost always a missed or spurious beat
+                    // — keep the detector synced but don't let it move the reading.
+                    if (S.hr_bpm == 0.0f ||
+                        (hr > S.hr_bpm * 0.6f && hr < S.hr_bpm * 1.6f)) {
+                        S.hr_bpm = (S.hr_bpm == 0.0f) ? hr
+                                 : S.hr_bpm + (hr - S.hr_bpm) * 0.2f;
+                    }
+                    S.peak_amp += (S.lp_prev - S.peak_amp) * 0.2f;
 
                     // Rough SpO2: R = (ACred/DCred)/(ACir/DCir).
                     const float ir_pp  = S.ac_ir_max  - S.ac_ir_min;
@@ -110,7 +133,7 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
                     S.last_beat_idx = peak_idx;
                 } else if (ibi > IBI_MAX_S) {
                     S.last_beat_idx = peak_idx;   // gap too long — restart
-                    S.peak_amp = S.ac_prev;
+                    S.peak_amp = S.lp_prev;
                 }
             }
             // Reset per-beat extremes.
@@ -124,8 +147,8 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
             S.last_beat_idx = -1;
         }
 
-        S.ac_prev2 = S.ac_prev;
-        S.ac_prev  = ac_s;
+        S.lp_prev2 = S.lp_prev;
+        S.lp_prev  = S.lp;
     }
 
     return beat;
@@ -140,4 +163,17 @@ ppg_vitals_t ppg_current_vitals(void)
         .valid    = S.finger && S.hr_bpm > 30.0f && S.hr_bpm < 220.0f,
     };
     return v;
+}
+
+size_t ppg_copy_waveform(int32_t *dst, size_t max)
+{
+    if (dst == NULL || max == 0) {
+        return 0;
+    }
+    const uint32_t head = S.wave_head;                 // snapshot the writer's index
+    const uint32_t n    = (PPG_WAVE_N < max) ? PPG_WAVE_N : (uint32_t)max;
+    for (uint32_t i = 0; i < n; i++) {
+        dst[i] = S.wave[(head - n + i) % PPG_WAVE_N];   // oldest..newest
+    }
+    return n;
 }

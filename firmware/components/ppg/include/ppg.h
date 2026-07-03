@@ -9,6 +9,10 @@
 // signal-quality index. HRV (RMSSD) is computed downstream from accepted IBIs.
 // The timing rationale for all of this lives in PLAN.md §3.3.
 
+// Band-passed PPG waveform samples retained for the on-device debug graph
+// (100 Hz sampling => a ~2.4 s scrolling window).
+#define PPG_WAVE_N 240
+
 typedef enum {
     PPG_BEAT_NORMAL,    // accepted for HR/HRV
     PPG_BEAT_ECTOPIC,   // physiological but excluded from HRV
@@ -38,3 +42,9 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
 
 // Latest smoothed vitals (for the live screen and per-epoch summary).
 ppg_vitals_t ppg_current_vitals(void);
+
+// Copy up to `max` most-recent band-passed waveform samples into `dst`, in
+// chronological order (oldest..newest); returns the count copied. Feeds the
+// on-device debug graph. Intended to be read from the same task that calls
+// ppg_process() (the sensor task), so no locking is needed.
+size_t ppg_copy_waveform(int32_t *dst, size_t max);
