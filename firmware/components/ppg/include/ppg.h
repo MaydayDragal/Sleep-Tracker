@@ -29,6 +29,7 @@ typedef struct {
 typedef struct {
     float hr_bpm;
     float spo2_pct;
+    float rmssd_ms; // live HRV over a rolling window of recent NORMAL beats; 0 until enough
     float sqi;     // 0..1 smoothed signal-quality index (perfusion x consistency)
     bool  finger;  // sensor is covered (DC above the finger threshold)
     bool  valid;   // finger + plausible HR + SQI above the trust floor

@@ -42,6 +42,10 @@
 #define PI_MIN           0.0004f    // perfusion at/below which the perfusion term -> 0
 #define SQI_VALID        0.3f       // vitals.valid requires the smoothed SQI above this
 
+// --- Live HRV (for testing) ---
+#define HRV_WIN          32         // rolling window of recent NORMAL IBIs
+#define HRV_MIN_BEATS    6          // min IBIs before reporting a live RMSSD
+
 static struct {
     float    dc_ir, dc_red;         // slow baselines (the high-pass stage)
     float    lp;                    // band-passed IR (DC-removed, low-passed)
@@ -60,6 +64,9 @@ static struct {
     float    med_red1, med_red2;    // raw median-3 despike history (RED)
     int      art_hold;              // motion-artifact suppression counter (samples)
     float    sqi;                   // smoothed 0..1 signal-quality index
+    float    ibi_win[HRV_WIN];      // rolling recent NORMAL IBIs (ms) for live HRV
+    int      ibi_count, ibi_head;
+    float    rmssd_ms;              // live RMSSD over the window (0 until HRV_MIN_BEATS)
     // fs-derived coefficients (set in ppg_reset)
     float    a_lp, a_dc, a_thr, a_pkdecay;
     int      wave_decim, wave_dcount;
@@ -79,6 +86,28 @@ static inline float med3f(float a, float b, float c)
 static inline float clampf(float v, float lo, float hi)
 {
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Push a NORMAL inter-beat interval into the rolling window and recompute the
+// live RMSSD = sqrt(mean(diff(IBI)^2)) over the ordered window (matches
+// sleep_hrv_rmssd, but self-contained so ppg doesn't depend on sleep_core).
+static void hrv_push(float ibi_ms)
+{
+    S.ibi_win[S.ibi_head] = ibi_ms;
+    S.ibi_head = (S.ibi_head + 1) % HRV_WIN;
+    if (S.ibi_count < HRV_WIN) S.ibi_count++;
+    if (S.ibi_count >= HRV_MIN_BEATS) {
+        const int start = (S.ibi_head - S.ibi_count + HRV_WIN) % HRV_WIN;
+        float prev = S.ibi_win[start];
+        double sumsq = 0.0;
+        for (int k = 1; k < S.ibi_count; k++) {
+            const float cur = S.ibi_win[(start + k) % HRV_WIN];
+            const double d = (double)cur - (double)prev;
+            sumsq += d * d;
+            prev = cur;
+        }
+        S.rmssd_ms = (float)sqrt(sumsq / (double)(S.ibi_count - 1));
+    }
 }
 
 void ppg_reset(void)
@@ -195,6 +224,7 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
                     if (plausible) {
                         S.hr_bpm = (S.hr_bpm == 0.0f) ? hr
                                  : S.hr_bpm + (hr - S.hr_bpm) * 0.2f;
+                        hrv_push(ibi * 1000.0f);   // feed the live HRV window
                     }
 
                     // Per-beat signal quality = perfusion x amplitude-consistency
@@ -243,6 +273,8 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
             S.spo2 = 0;
             S.sqi = 0;
             S.last_beat_idx = -1;
+            S.ibi_count = S.ibi_head = 0;   // drop stale HRV window on a new contact
+            S.rmssd_ms = 0;
         }
 
         S.lp_prev2 = S.lp_prev;
@@ -257,6 +289,7 @@ ppg_vitals_t ppg_current_vitals(void)
     ppg_vitals_t v = {
         .hr_bpm   = S.hr_bpm,
         .spo2_pct = S.spo2,
+        .rmssd_ms = S.rmssd_ms,
         .sqi      = S.sqi,
         .finger   = S.finger,
         .valid    = S.finger && S.hr_bpm > 30.0f && S.hr_bpm < 220.0f &&

@@ -18,6 +18,7 @@ static const char *TAG = "ui";
 static lv_obj_t *s_time_lbl;
 static lv_obj_t *s_accel_lbl;
 static lv_obj_t *s_hr_lbl;
+static lv_obj_t *s_hrv_lbl;
 static lv_obj_t *s_batt_lbl;
 static lv_obj_t *s_chart;
 static lv_chart_series_t *s_ppg_ser;
@@ -47,7 +48,8 @@ esp_err_t ui_init(void)
         s_time_lbl  = make_label(scr, "--:--:--", 36);
         s_accel_lbl = make_label(scr, "IMU: -- g", 62);
         s_hr_lbl    = make_label(scr, "HR: -- (no finger)", 88);
-        s_batt_lbl  = make_label(scr, "Batt: --", 114);
+        s_hrv_lbl   = make_label(scr, "HRV: --", 114);
+        s_batt_lbl  = make_label(scr, "Batt: --", 140);
 
         // Live PPG waveform graph — band-passed IR, auto-scaled per frame.
         s_chart = lv_chart_create(scr);
@@ -95,6 +97,15 @@ void ui_set_status(const ui_status_t *s)
         lv_label_set_text(s_hr_lbl, buf);
     } else {
         lv_label_set_text(s_hr_lbl, "HR: -- (reading...)");
+    }
+
+    if (!s->finger) {
+        lv_label_set_text(s_hrv_lbl, "HRV: --");
+    } else if (s->hrv_ms > 0) {
+        snprintf(buf, sizeof buf, "HRV: %d ms (RMSSD)", s->hrv_ms);
+        lv_label_set_text(s_hrv_lbl, buf);
+    } else {
+        lv_label_set_text(s_hrv_lbl, "HRV: -- (measuring)");
     }
 
     const char *src = s->charging ? "CHG" : (s->vbus ? "USB" : "BAT");
