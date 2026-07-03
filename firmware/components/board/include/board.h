@@ -45,9 +45,28 @@ void board_i2c_scan(void);
 // Mount the microSD card (FAT) at the BSP's configured mount point ("/sdcard").
 esp_err_t board_sdcard_mount(void);
 
+// microSD lifecycle helpers for the night logger (handle a pulled card without
+// crashing). board_sdcard_mounted() reflects the last known mount state.
+esp_err_t board_sdcard_unmount(void);
+esp_err_t board_sdcard_remount(void);
+bool      board_sdcard_mounted(void);
+
+// Mark the card lost (e.g. a write failed) without touching the dead hardware,
+// so the next board_sdcard_remount() actually re-initializes FATFS.
+void      board_sdcard_mark_lost(void);
+
 // Start display + touch + LVGL (delegates to the managed BSP). After this,
 // take board_display_lock()/unlock() around any lv_* calls (LVGL is serviced by
 // the esp_lvgl_port task inside the BSP — do NOT call lv_timer_handler here).
 esp_err_t board_display_start(void);
 bool      board_display_lock(uint32_t timeout_ms);
 void      board_display_unlock(void);
+
+// Blank/unblank the AMOLED (CO5300 brightness 0/full) for display-off tracking.
+void      board_display_set_on(bool on);
+
+// Stop/resume the esp_lvgl_port timer task so the CPU can enter tickless light
+// sleep during tracking (the port's periodic timer would otherwise keep waking
+// it). Pair board_lvgl_stop() on entering TRACKING with board_lvgl_resume().
+void      board_lvgl_stop(void);
+void      board_lvgl_resume(void);
