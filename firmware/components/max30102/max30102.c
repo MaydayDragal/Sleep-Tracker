@@ -37,6 +37,22 @@ static esp_err_t wr(uint8_t reg, uint8_t val)
     return i2c_master_transmit(s_dev, b, sizeof b, 100);
 }
 
+// SPO2_CONFIG (0x0A): [6:5]=ADC range (1 => 4096 nA), [4:2]=sample-rate code,
+// [1:0]=LED pulse-width/resolution. Higher sample rates need a shorter pulse so
+// both LED slots (red + IR) fit within the sample period.
+static uint8_t spo2_config(uint16_t sr_hz)
+{
+    uint8_t sr, pw;      // sample-rate code / pulse-width code
+    switch (sr_hz) {
+        case 50:  sr = 0; pw = 3; break;   // 411 us, 18-bit
+        case 100: sr = 1; pw = 3; break;   // 411 us, 18-bit
+        case 200: sr = 2; pw = 2; break;   // 215 us, 17-bit
+        case 400: sr = 3; pw = 1; break;   // 118 us, 16-bit
+        default:  sr = 1; pw = 3; break;   // fall back to 100 Hz
+    }
+    return (uint8_t)((1u << 5) | (sr << 2) | pw);
+}
+
 esp_err_t max30102_init(i2c_master_bus_handle_t bus, const max30102_config_t *cfg)
 {
     const i2c_device_config_t dc = {
@@ -65,14 +81,16 @@ esp_err_t max30102_init(i2c_master_bus_handle_t bus, const max30102_config_t *cf
 
     wr(REG_FIFO_CONFIG, 0x10);   // no sample-averaging, FIFO rollover enabled
     wr(REG_MODE_CONFIG, 0x03);   // SpO2 mode (red + IR)
-    wr(REG_SPO2_CONFIG, 0x27);   // ADC 4096 nA, 100 Hz, 411 us pulse (18-bit)
+    const uint16_t sr = (cfg && cfg->sample_rate_hz) ? cfg->sample_rate_hz : 100;
+    wr(REG_SPO2_CONFIG, spo2_config(sr));   // ADC 4096 nA + sample rate + pulse width
 
     uint8_t red = (cfg && cfg->led_current_red) ? cfg->led_current_red : 0x24;
     uint8_t ir  = (cfg && cfg->led_current_ir)  ? cfg->led_current_ir  : 0x24;
     wr(REG_LED1_PA, red);
     wr(REG_LED2_PA, ir);
 
-    ESP_LOGI(TAG, "MAX30102 up (PART_ID=0x15, SpO2 100Hz, LED red/ir=%u/%u)", red, ir);
+    ESP_LOGI(TAG, "MAX30102 up (PART_ID=0x15, SpO2 %uHz, LED red/ir=%u/%u)",
+             (unsigned)sr, red, ir);
     return ESP_OK;
 }
 

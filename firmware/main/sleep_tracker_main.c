@@ -48,27 +48,46 @@ static volatile bool s_display_ready = false;
 // -- ACTIVE mode: drain PPG + refresh the live UI (the Phase-1 loop body) ----
 static void active_poll(void)
 {
-    static int slow = 0, echo = 0, raw = 0;
+    static int slow = 0, echo = 0, wave = 0;
+    static int64_t rate_t0 = 0;
+    static int rate_n = 0;
 
     max30102_sample_t fifo[32];
     size_t n = 0;
     if (max30102_read_fifo(fifo, 32, &n) == ESP_OK && n > 0) {
         ppg_beat_t beat;
         ppg_process(fifo, n, &beat);
+
+        // Report the TRUE internal PPG sample rate once/sec (independent of the
+        // debug stream), so we can tell whether the loop actually keeps up at 400 Hz.
+        rate_n += (int)n;
+        const int64_t now = esp_timer_get_time();
+        if (rate_t0 == 0) {
+            rate_t0 = now;
+        } else if (now - rate_t0 >= 1000000) {
+            ESP_LOGI(TAG, "ppg: %d Hz internal, ir=%lu red=%lu (n=%u/read)",
+                     (int)((int64_t)rate_n * 1000000 / (now - rate_t0)),
+                     (unsigned long)fifo[0].ir, (unsigned long)fifo[0].red, (unsigned)n);
+            rate_t0 = now;
+            rate_n = 0;
+        }
 #if PPG_RAW_STREAM
+        static int strd = 0;
         for (size_t k = 0; k < n; k++) {
-            printf("R,%lu,%lu\n", (unsigned long)fifo[k].ir, (unsigned long)fifo[k].red);
+            if ((strd++ & 1) == 0) {   // decimate the console stream to ~half rate for headroom
+                printf("R,%lu,%lu\n", (unsigned long)fifo[k].ir, (unsigned long)fifo[k].red);
+            }
         }
 #endif
-        if ((raw++ % 8) == 0) {   // raw echo ~every 1 s — proves the PPG responds
-            ESP_LOGI(TAG, "ppg raw: ir=%lu red=%lu (n=%u)",
-                     (unsigned long)fifo[0].ir, (unsigned long)fifo[0].red, (unsigned)n);
-        }
     }
 
-    ui_update_waveform();   // refresh the live PPG graph (~8 Hz)
+    // Refresh the PPG graph ~every 100 ms only — the LVGL chart redraw is heavy,
+    // and doing it every loop was stalling the 400 Hz FIFO drain (=> overflow).
+    if ((wave++ % 5) == 0) {
+        ui_update_waveform();
+    }
 
-    if ((slow++ % 4) == 0) {   // ~every 480 ms
+    if ((slow++ % 25) == 0) {   // ~every 500 ms (loop is ~20 ms)
         char timebuf[16] = "--:--:--";
         ui_status_t st = { .time_str = timebuf, .accel_g = 0.0f, .batt_pct = -1 };
 
@@ -148,7 +167,7 @@ static void tracking_wake(int wake_count)
             ppg_vitals_t v = ppg_current_vitals();
             sleep_core_feed_vitals(&v);
             sleep_core_service();   // close boundaries crossed during the window
-            vTaskDelay(pdMS_TO_TICKS(120));
+            vTaskDelay(pdMS_TO_TICKS(40));   // drain the 32-deep FIFO fast enough at 400 Hz
         }
 
         max30102_shutdown(true);
@@ -182,11 +201,13 @@ static void sensor_task(void *arg)
     i2c_master_bus_handle_t bus;
     ESP_ERROR_CHECK(board_i2c_get_bus(&bus));
 
-    // 100 Hz PPG: matches the driver's REG_SPO2_CONFIG and ppg.c's PPG_FS_HZ so
-    // logged IBI/HR timing is consistent. (HRV wants 200-400 Hz — a later change
-    // that must move ALL THREE together; see phase1-gaps.)
+    // 400 Hz PPG (SPO2_CONFIG 118 us / 16-bit). fs is the single knob: the driver
+    // sets the register from sample_rate_hz and ppg.c derives its filter/IBI
+    // constants from PPG_FS_HZ, so all three stay in sync. 400 Hz gives ~2.5 ms
+    // beat-timing resolution for HRV (PLAN.md §3.3); the 32-deep FIFO fills in
+    // ~80 ms, so the poll loops below drain it every ~40 ms.
     const max30102_config_t ppg_cfg = {
-        .sample_rate_hz  = 100,
+        .sample_rate_hz  = 400,
         .led_current_red = 40,
         .led_current_ir  = 40,
         .int_gpio        = -1,   // polled FIFO; no INT line on this board
@@ -253,7 +274,7 @@ static void sensor_task(void *arg)
             tracking_wake(wake_count++);
         } else {
             active_poll();
-            vTaskDelay(pdMS_TO_TICKS(120));
+            vTaskDelay(pdMS_TO_TICKS(20));   // ~20 ms loop keeps the 32-deep FIFO from overflowing at 400 Hz
         }
     }
 }

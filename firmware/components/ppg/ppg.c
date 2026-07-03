@@ -4,20 +4,25 @@
 #include <string.h>
 
 // PPG pipeline (Phase 1 + accuracy pass): DC removal (high-pass) followed by a
-// 1-pole low-pass => a ~0.5-4 Hz band-pass; an adaptive-threshold peak detector
+// 1-pole low-pass => a ~0.16-5 Hz band-pass; an adaptive-threshold peak detector
 // on the filtered IR channel for HR, with inter-beat-interval plausibility
 // gating so a spurious/missed beat can't yank the displayed rate; and a rough
-// ratio-of-ratios SpO2. The band-passed waveform is retained in a ring buffer
-// for the on-device debug graph (ppg_copy_waveform). HRV-grade sub-sample
-// fiducials (PLAN.md §3.3) come later.
+// ratio-of-ratios SpO2. The band-passed waveform is retained (decimated to ~100
+// Hz) in a ring buffer for the on-device debug graph (ppg_copy_waveform).
+//
+// All the filter coefficients are derived from PPG_FS_HZ at ppg_reset(), so the
+// sample rate is the single knob — change it here + the driver's SPO2_CONFIG +
+// the FIFO poll cadence in main, and the filters retune themselves.
 
-#define PPG_FS_HZ        100.0f     // MUST match the MAX30102 sample rate
+#define PPG_FS_HZ        400.0f     // MUST match the MAX30102 SPO2_CONFIG rate
 #define FINGER_IR_MIN    30000.0f   // IR DC below this => no finger on the sensor
 #define REFRACTORY_S     0.35f      // min beat spacing (=> max ~171 bpm)
 #define IBI_MAX_S        2.0f       // max beat spacing (=> min 30 bpm)
 #define PEAK_FRAC        0.5f       // a beat must reach this fraction of the tracked
                                     // systolic amplitude (rejects the dicrotic notch)
-#define LP_ALPHA         0.25f      // 1-pole low-pass over the AC signal (~4 Hz @ 100 Hz)
+#define LP_FC_HZ         5.0f       // band-pass low-pass corner
+#define HP_FC_HZ         0.16f      // baseline (high-pass) corner
+#define WAVE_TARGET_HZ   100.0f     // decimate the graph waveform to ~this rate
 
 static struct {
     float    dc_ir, dc_red;         // slow baselines (the high-pass stage)
@@ -32,14 +37,24 @@ static struct {
     float    ac_ir_max, ac_ir_min, ac_red_max, ac_red_min;  // per-beat extremes
     bool     finger;
     bool     seeded;
+    // fs-derived coefficients (set in ppg_reset)
+    float    a_lp, a_dc, a_thr, a_pkdecay;
+    int      wave_decim, wave_dcount;
     int32_t  wave[PPG_WAVE_N];      // band-passed waveform ring (on-device graph)
-    uint32_t wave_head;             // total samples written
+    uint32_t wave_head;             // total decimated samples written
 } S;
 
 void ppg_reset(void)
 {
     memset(&S, 0, sizeof S);
     S.last_beat_idx = -1;
+    // 1-pole coefficients from the target corners (alpha = 1 - e^{-2*pi*fc/fs}).
+    S.a_lp  = 1.0f - expf(-2.0f * (float)M_PI * LP_FC_HZ / PPG_FS_HZ);
+    S.a_dc  = 1.0f - expf(-2.0f * (float)M_PI * HP_FC_HZ / PPG_FS_HZ);
+    S.a_thr = 1.0f / PPG_FS_HZ;                  // ~1 s envelope time constant
+    S.a_pkdecay = expf(-1.0f / (PPG_FS_HZ * 10.0f));  // ~10 s peak-amp decay
+    S.wave_decim = (int)(PPG_FS_HZ / WAVE_TARGET_HZ + 0.5f);
+    if (S.wave_decim < 1) S.wave_decim = 1;
 }
 
 bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_beat)
@@ -60,23 +75,26 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         // peak_amp.
         const float d_ir  = ir  - S.dc_ir;
         const float d_red = red - S.dc_red;
-        S.dc_ir  += (fabsf(d_ir)  > 5000.0f) ? d_ir  * 0.5f : d_ir  * 0.01f;
-        S.dc_red += (fabsf(d_red) > 5000.0f) ? d_red * 0.5f : d_red * 0.01f;
+        S.dc_ir  += (fabsf(d_ir)  > 5000.0f) ? d_ir  * 0.5f : d_ir  * S.a_dc;
+        S.dc_red += (fabsf(d_red) > 5000.0f) ? d_red * 0.5f : d_red * S.a_dc;
         S.finger = S.dc_ir > FINGER_IR_MIN;
 
         const float ac_ir  = ir  - S.dc_ir;
         const float ac_red = red - S.dc_red;
 
-        // Low-pass the AC => a clean band-passed pulse (the old 3-tap average let
-        // far more high-frequency noise through).
-        S.lp += (ac_ir - S.lp) * LP_ALPHA;
+        // Low-pass the AC => a clean band-passed pulse.
+        S.lp += (ac_ir - S.lp) * S.a_lp;
 
-        // Retain the filtered sample for the on-device debug graph.
-        S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)S.lp;
-        S.wave_head++;
+        // Retain the filtered sample for the on-device debug graph (decimated so
+        // the window duration is fs-independent).
+        if (++S.wave_dcount >= S.wave_decim) {
+            S.wave_dcount = 0;
+            S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)S.lp;
+            S.wave_head++;
+        }
 
-        S.thr += (fabsf(S.lp) - S.thr) * 0.01f;
-        S.peak_amp *= 0.999f;   // slow decay so a stale/too-high amplitude self-heals
+        S.thr += (fabsf(S.lp) - S.thr) * S.a_thr;
+        S.peak_amp *= S.a_pkdecay;   // slow decay so a stale/too-high amplitude self-heals
 
         // Track AC extremes for SpO2 (reset each accepted beat).
         if (ac_ir  > S.ac_ir_max)  S.ac_ir_max  = ac_ir;
