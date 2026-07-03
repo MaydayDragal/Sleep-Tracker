@@ -45,6 +45,29 @@ static const char *TAG = "main";
 // mode transition (display off / LVGL stop) before LVGL exists.
 static volatile bool s_display_ready = false;
 
+// ACTIVE-mode HR/HRV duty-cycle. HR only needs a low sample rate (validated down
+// to ~12.5 Hz offline; 50 Hz is the MAX30102 native floor and ~half the LED duty
+// of 100 Hz), so we run HR at a low rate to save power and periodically bump to
+// 400 Hz for an HRV snapshot. Testable over USB now; the same infra is meant to
+// drive the battery TRACKING path later.
+#define HR_RATE_HZ     50       // low-power HR-only rate
+#define HRV_RATE_HZ    400      // high-rate window for precise HRV timing
+#define HR_WINDOW_MS   20000    // stay in low-rate HR mode this long...
+#define HRV_WINDOW_MS  15000    // ...then run 400 Hz this long, capturing HRV
+static uint16_t s_ppg_rate;     // current sensor rate (0 => not yet configured)
+static bool     s_hrv_window;   // true while in the 400 Hz HRV window
+static int64_t  s_mode_t0;      // esp_timer at the current window's start
+
+static void active_set_ppg_rate(uint16_t hz)
+{
+    if (hz == s_ppg_rate) {
+        return;
+    }
+    max30102_set_sample_rate(hz);
+    ppg_set_rate((float)hz);
+    s_ppg_rate = hz;
+}
+
 // -- ACTIVE mode: drain PPG + refresh the live UI (the Phase-1 loop body) ----
 static void active_poll(void)
 {
@@ -65,9 +88,11 @@ static void active_poll(void)
         if (rate_t0 == 0) {
             rate_t0 = now;
         } else if (now - rate_t0 >= 1000000) {
-            ESP_LOGI(TAG, "ppg: %d Hz internal, ir=%lu red=%lu (n=%u/read)",
+            ppg_vitals_t vd = ppg_current_vitals();
+            ESP_LOGI(TAG, "ppg: %d Hz internal, ir=%lu hr=%d hrv=%dms sqi=%.2f",
                      (int)((int64_t)rate_n * 1000000 / (now - rate_t0)),
-                     (unsigned long)fifo[0].ir, (unsigned long)fifo[0].red, (unsigned)n);
+                     (unsigned long)fifo[0].ir, (int)(vd.hr_bpm + 0.5f),
+                     (int)(vd.rmssd_ms + 0.5f), vd.sqi);
             rate_t0 = now;
             rate_n = 0;
         }
@@ -117,8 +142,8 @@ static void active_poll(void)
         }
 
         if ((echo++ % 10) == 0) {   // ~every 5 s
-            ESP_LOGI(TAG, "readout: t=%s accel=%dmg hr=%d spo2=%d hrv=%dms finger=%d sqi=%.2f%s batt=%d%% %s",
-                     timebuf, (int)(st.accel_g * 1000.0f), st.hr_bpm, st.spo2, st.hrv_ms,
+            ESP_LOGI(TAG, "readout: t=%s rate=%uHz hr=%d spo2=%d hrv=%dms finger=%d sqi=%.2f%s batt=%d%% %s",
+                     timebuf, (unsigned)s_ppg_rate, st.hr_bpm, st.spo2, st.hrv_ms,
                      st.finger, v.sqi, v.valid ? "" : " (untrusted)", st.batt_pct,
                      st.charging ? "CHG" : (st.vbus ? "USB" : "BAT"));
         }
@@ -254,6 +279,8 @@ static void sensor_task(void *arg)
             vbus_agree = 0;
             if (want_tracking) {
                 power_enter_tracking();
+                max30102_set_sample_rate(HRV_RATE_HZ);   // tracking runs full-rate PPG
+                ppg_set_rate((float)HRV_RATE_HZ);
                 sleep_core_request_start();
                 sleep_core_service();           // apply the start (opens the SD log)
                 tracking = true;
@@ -265,6 +292,7 @@ static void sensor_task(void *arg)
                 max30102_shutdown(false);       // re-wake PPG for the live ACTIVE UI
                 power_exit_tracking();
                 tracking = false;
+                s_ppg_rate = 0;                 // force the ACTIVE duty-cycle to reconfigure
                 ESP_LOGI(TAG, "VBUS present -> stop tracking");
             }
         } else if (want_tracking == tracking) {
@@ -274,8 +302,27 @@ static void sensor_task(void *arg)
         if (tracking) {
             tracking_wake(wake_count++);
         } else {
+            // HR/HRV duty-cycle: low-rate HR most of the time, a periodic 400 Hz
+            // window for HRV. Sensor + DSP rate are switched together.
+            const int64_t now = esp_timer_get_time();
+            if (s_ppg_rate == 0) {
+                s_mode_t0 = now;
+                active_set_ppg_rate(HR_RATE_HZ);
+            }
+            const int64_t elapsed_ms = (now - s_mode_t0) / 1000;
+            if (!s_hrv_window && elapsed_ms >= HR_WINDOW_MS) {
+                s_hrv_window = true;  s_mode_t0 = now;
+                active_set_ppg_rate(HRV_RATE_HZ);
+                ESP_LOGI(TAG, "duty-cycle: HRV window @ %d Hz", HRV_RATE_HZ);
+            } else if (s_hrv_window && elapsed_ms >= HRV_WINDOW_MS) {
+                s_hrv_window = false; s_mode_t0 = now;
+                active_set_ppg_rate(HR_RATE_HZ);
+                ESP_LOGI(TAG, "duty-cycle: HR low-power @ %d Hz", HR_RATE_HZ);
+            }
             active_poll();
-            vTaskDelay(pdMS_TO_TICKS(20));   // ~20 ms loop keeps the 32-deep FIFO from overflowing at 400 Hz
+            // Poll fast enough for the FIFO at the current rate (32 deep): ~20 ms
+            // at 400 Hz, a relaxed ~200 ms at 50 Hz (also less CPU wake).
+            vTaskDelay(pdMS_TO_TICKS(s_ppg_rate >= 200 ? 20 : 200));
         }
     }
 }
