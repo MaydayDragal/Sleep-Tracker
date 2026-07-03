@@ -14,6 +14,7 @@ static const char *TAG = "ui";
 
 static lv_obj_t *s_time_lbl;
 static lv_obj_t *s_accel_lbl;
+static lv_obj_t *s_hr_lbl;
 static lv_obj_t *s_batt_lbl;
 
 static void tap_btn_cb(lv_event_t *e)
@@ -47,7 +48,8 @@ esp_err_t ui_init(void)
         make_label(scr, "Sleep Tracker", 24);
         s_time_lbl  = make_label(scr, "--:--:--", 70);
         s_accel_lbl = make_label(scr, "IMU: -- g", 110);
-        s_batt_lbl  = make_label(scr, "Batt: --", 150);
+        s_hr_lbl    = make_label(scr, "HR: -- (no finger)", 150);
+        s_batt_lbl  = make_label(scr, "Batt: --", 190);
 
         // Tap-test: button + counter — verifies the touch path end to end.
         lv_obj_t *counter = lv_label_create(scr);
@@ -86,6 +88,15 @@ void ui_set_status(const ui_status_t *s)
     int g100 = (int)(s->accel_g * 100.0f + 0.5f);   // integer format — avoid %f
     snprintf(buf, sizeof buf, "IMU: %d.%02d g", g100 / 100, g100 % 100);
     lv_label_set_text(s_accel_lbl, buf);
+
+    if (!s->finger) {
+        lv_label_set_text(s_hr_lbl, "HR: -- (no finger)");
+    } else if (s->hr_bpm > 0) {
+        snprintf(buf, sizeof buf, "HR: %d bpm   SpO2: %d%%", s->hr_bpm, s->spo2);
+        lv_label_set_text(s_hr_lbl, buf);
+    } else {
+        lv_label_set_text(s_hr_lbl, "HR: -- (reading...)");
+    }
 
     const char *src = s->charging ? "CHG" : (s->vbus ? "USB" : "BAT");
     if (s->batt_pct >= 0) {
