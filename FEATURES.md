@@ -73,7 +73,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P0] Tracking screen** — minimal dimmed clock during sleep, "recording" indicator
 - **[P0] Morning report** — score card → hypnogram → HR/SpO2 charts, swipeable
 - **[P0] Settings** — alarm, brightness, start/stop mode, time
-- **[P1] Tilt-to-wake / tap-to-wake** — display stays off until summoned
+- **[P1] Tap-to-wake** — touch the display to wake it; stays off until summoned
 - **[P1] 7-night history** — on-device trend view of scores and key metrics
 - **[P2] Always-on display mode** — dim clock (AMOLED-friendly, black background), with burn-in mitigation (pixel shifting)
 - **[P2] Do-not-disturb / theater mode** — guarantee zero light and sound during the night
@@ -186,7 +186,7 @@ Extra metrics we *could* derive from the sensors already in the design (MAX3010x
 |---|---|---|
 | P0 | Sections 1, 2 (HR/SpO2 core), 3 (wrist actigraphy), 7 cores + basic alarm, watch face, morning report, power/battery basics | Phases 0–4 |
 | P1 (§3a) | Body-sensor network: pair/manage WT9011DCL, authoritative sleep position; position-segmented biometrics in Phase 3 | Phase 2.5–3 |
-| P1 | HRV (nice-to-have, power-permitting; opportunistic across Phases 1–3), auto sleep detection, smart alarm, USB offload/streaming, tilt-to-wake, history, OTA | Phase 4–5 |
+| P1 | HRV (nice-to-have, power-permitting; opportunistic across Phases 1–3), auto sleep detection, smart alarm, USB offload/streaming, tap-to-wake, history, OTA | Phase 4–5 |
 | P2 | Audio features, insights/correlations, BLE/Wi-Fi sync, EDF, AOD | Phase 5+ |
 | Integration (§11) | HA/MQTT uplink → CPAP downlink → combined summary → cross-device insights | v3+ — integration track I0–I5 (INTEGRATION.md §7) |
 | Opportunistic (§13) | Extra derivable metrics from existing sensors — RR fusion, apnea proxy, PI/ODI, arousal detection, audio/IMU-derived signals | Phase 5+ / only as time·code·storage·power allow |

@@ -41,7 +41,7 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** 
 | MCU | ESP32-S3R8 (dual-core LX7 @240 MHz, Wi-Fi 4, BLE 5, **8 MB PSRAM**, 16 MB flash, native USB) | — | Everything; a core for sensing + a core for UI/logging; BLE/Wi-Fi for sync |
 | Display | 1.8" AMOLED 368×448, **CO5300** (on-hardware; earlier docs said SH8601) | QSPI | UI, morning report |
 | Touch | FT3168 / FT6146 | I2C | UI input |
-| IMU | QMI8658 (6-axis accel + gyro) | I2C | Movement/actigraphy, wake-on-motion, tilt-to-wake |
+| IMU | QMI8658 (6-axis accel + gyro) | I2C | Movement/actigraphy, wake-on-motion |
 | RTC | PCF85063 (backup-battery pads) | I2C | Timekeeping across resets, epoch timestamps |
 | PMU | AXP2101 | I2C | Battery charging, voltage/fuel readings, power rails |
 | Audio | ES8311 codec + mics + speaker | I2S/I2C | Smart alarm; snore detection (stretch) |
@@ -84,7 +84,7 @@ Rough overnight (8 h) estimate with display off:
 | ESP32-S3 | Light sleep between sensor windows, radio off; PSRAM self-refresh in sleep | 2–8 mA |
 | MAX3010x | Duty-cycled: ~30–60 s of PPG every 5 min, low LED current | 0.2–1 mA |
 | QMI8658 | Accel-only low-power mode (~50 Hz), gyro off | <0.1 mA |
-| AMOLED | Off during sleep; tilt/touch-to-wake | ~0 |
+| AMOLED | Off during sleep; tap-to-wake | ~0 |
 
 That lands roughly in the 3–10 mA average range. The S3 is thirstier than the C6 (dual-core, PSRAM self-refresh in sleep is the main adder), so a **500–1000 mAh Li-Po** is the recommended cell rather than the stock 250 mAh — both fit the same MX1.25 header. The optional **HRV** feature is the main power-hungry add-on — it wants longer continuous clean-capture windows — so **whether we enable HRV is decided by the measured power budget** (spike S4, VALIDATION.md): if the chosen cell comfortably covers a night *with* those windows, we keep them; if not, HRV is thinned or dropped first, before core tracking is touched. The sampling scheduler (Phase 2) makes this a configurable trade-off. **If overnight drain proves unacceptable even with the bigger cell, the C6 fallback is the lever** — same firmware, lower-power SoC, at the cost of raw-waveform logging.
 
@@ -167,10 +167,10 @@ HRV is a **nice-to-have, not a requirement** — we enable it only when the meas
 ## 4. Device States & UX
 
 ```
-        tilt/touch/button                 user taps "Start sleep" (or auto-detect)
+        tap / button                      user taps "Start sleep" (or auto-detect)
 IDLE  ────────────────►  WATCH FACE  ───────────────────────────►  TRACKING
 (display off,             (time, battery,                          (display off, sensors duty-cycling,
- accel wake armed)         last night's score)                      tilt-to-wake shows minimal clock)
+ tap-to-wake armed)        last night's score)                      tap-to-wake shows minimal clock)
                                 ▲                                        │ wake detected / user stops / alarm
                                 └──────────  MORNING REPORT  ◄───────────┘
                                              (score, hypnogram, HR/SpO2 charts)
@@ -244,7 +244,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 ### Phase 4 — UI polish
 **Goal:** make the on-device experience complete and pleasant.
 - [ ] Watch face, morning report with hypnogram + HR/SpO2 charts, settings, history of last 7 nights.
-- [ ] Tilt-to-wake, brightness/AOD handling.
+- [ ] Tap-to-wake, brightness/AOD handling.
 - **Exit criteria:** all four v1 screens plus the 7-night history are navigable on-device, and a real night's report renders end-to-end from an SD log.
 
 ### Phase 5 — Stretch features
