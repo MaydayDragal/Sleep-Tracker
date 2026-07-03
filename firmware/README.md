@@ -2,7 +2,7 @@
 
 ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** (+ external MAX3010x PPG sensor: MAX30102 now → MAX30101 planned).
 
-**Status (Phase 0 bring-up working):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The sensor/DSP/UI *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**).
+**Status (Phases 0–1 done, verified on hardware):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The Phase 1 sensor + PPG bodies are now live on hardware — the PCF85063 RTC ticks, the QMI8658 reads ~1 g at rest, the AXP2101 reports battery, and the external MAX30102 yields live heart rate (~81 bpm) and SpO2 (98–99%). The remaining UI/recording/sync *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**).
 
 ## Build / flash / monitor
 
@@ -39,8 +39,9 @@ idf.py -p <PORT> flash monitor
 ```
 
 At this stage a build boots, brings up the shared I2C bus, and starts the two
-tasks (`sensor` pinned to core 1, `ui` on core 0), logging stubs for the
-not-yet-implemented pieces. That's the intended Phase 0 starting point.
+tasks (`sensor` pinned to core 1, `ui` on core 0); the sensor task now reads the
+RTC, IMU, battery, and MAX30102 PPG live, while the not-yet-implemented
+UI/recording/sync pieces still log stubs.
 
 ## Layout
 

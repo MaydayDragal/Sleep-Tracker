@@ -200,17 +200,17 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 **Goal:** get the board alive and wearable — pixels on screen, every device answering, running on battery.
 - [ ] Repo scaffolding: ESP-IDF project, CI build (GitHub Actions with `espressif/idf` container), `sdkconfig.defaults`.
 - [ ] Port Waveshare BSP: display + touch + LVGL "hello world"; verify PMU, RTC, IMU over I2C, and detect the microSD card over SPI (FAT mount + crash-safe writer come in Phase 2).
-- [ ] Wire the MAX3010x PPG sensor (MAX30102 first, then MAX30101 — same `0x57` address) to the I2C pads; confirm it ACKs alongside the onboard devices.
+- [x] Wire the MAX3010x PPG sensor (MAX30102 first, then MAX30101 — same `0x57` address) to the I2C pads; confirm it ACKs alongside the onboard devices.
 - [ ] First-pass strap/enclosure so the unit can actually be worn (even if crude).
 - **Exit criteria:** board boots into an LVGL screen, all I2C devices enumerate, battery charges and runs untethered.
 
 ### Phase 1 — Sensor drivers
 **Goal:** turn the raw sensors into trustworthy live vitals and a per-beat IBI series.
 - **Before building, run the de-risking spikes** in [VALIDATION.md](VALIDATION.md) §1 (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is feasible on your wrist — it does **not** gate this phase; a poor S1 just means HRV is deferred or dropped while HR/SpO2/movement proceed.
-- [ ] MAX3010x driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
-- [ ] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
+- [x] MAX3010x driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
+- [x] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
 - [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
-- [ ] RTC set/read; battery gauge via AXP2101.
+- [x] RTC set/read; battery gauge via AXP2101.
 - [ ] (Optional, if pursuing HRV) Sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %. (Basic beat detection for HR is already covered above; this is the HRV-grade precision.)
 - [ ] (Optional, if pursuing HRV) Dev-only `refmon` component: subscribe to the Polar H10 RR intervals over BLE and show them next to the wrist RMSSD, timestamped by one device clock (VALIDATION.md §3) — a live reference for tuning HRV. It also stands up the BLE-central plumbing that `bodynet` reuses in Phase 2.5.
 - **Exit criteria:** a live "vitals" screen showing plausible HR (±5 bpm vs finger check), SpO2, and movement level. (If HRV is being pursued, a live RMSSD tracking the H10 in a still 2-min window is a nice bonus check — not required to pass this phase.)
@@ -280,7 +280,7 @@ Engineering techniques to apply as the relevant components are built — most im
 | Memory pressure from display + DSP + raw logging | S3's 8 MB PSRAM covers it; keep PPG processing streaming and flush raw buffers to SD periodically |
 | 250 mAh stock battery too small for the S3 | Use a 500–1000 mAh cell on the same MX1.25 connector |
 | Touch controller variant differs by batch (FT3168 vs FT6146) | Probe at runtime; both are FocalTech and near-identical over I2C |
-| Which exact GPIOs the expansion I2C pads map to | Confirm from the Rev1.1 schematic in Waveshare's repo during Phase 0 |
+| Which exact GPIOs the expansion I2C pads map to | Confirmed in Phase 0 — the external MAX30102 now ACKs at `0x57` on the shared I2C pads alongside the onboard devices |
 | Body sensors only last ~one night (130 mAh) | Nightly charging as UX; low output rate; flag a sensor that dies mid-night rather than silently gap |
 | BLE (N body sensors + H10) contends with Wi-Fi on one radio | Long connection intervals (position is slow); cap paired-sensor count; H10 as dev/opportunistic; verify NimBLE max-connections config |
 | Wireless sensors aren't clock-synced to the hub | Hub-receive timestamps suffice for slow position/movement; don't use them for sub-100 ms event alignment |
@@ -317,6 +317,6 @@ Sleep-Tracker/
 └── docs/                    # per-subsystem notes as they solidify (TODO)
 ```
 
-**Status (Phase 0 essentially done):** the firmware boots on real hardware — dual-core task architecture running, all onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`, plus the FT3168 touch at `0x38` once its reset is released), the CO5300 AMOLED + LVGL come up, and **touch works** (verified with an on-screen tap counter). Board bring-up is delegated to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets on the TCA9554 (a gap in the vendor BSP). The **RTC (PCF85063), IMU accel (QMI8658), and battery (AXP2101)** now read live over I2C — verified on a diagnostic screen (clock ticking, ~1 g at rest, ~4.1 V / charging) — via hand-rolled register-level drivers (`components/rtc`, `components/pmu`, `components/actigraphy`), since the managed chip components require IDF ≥5.5 and we're on 5.4. The PPG/DSP/scoring bodies remain stubbed and tagged `TODO(phaseN)`.
+**Status (Phases 0–1 done on hardware; PPG live):** the firmware boots on real hardware — dual-core task architecture running, all onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`, plus the FT3168 touch at `0x38` once its reset is released), the CO5300 AMOLED + LVGL come up, and **touch works** (verified with an on-screen tap counter). Board bring-up is delegated to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets on the TCA9554 (a gap in the vendor BSP). The **RTC (PCF85063), IMU accel (QMI8658), and battery (AXP2101)** now read live over I2C — verified on a diagnostic screen (clock ticking, ~1 g at rest, ~4.1 V / charging) — via hand-rolled register-level drivers (`components/rtc`, `components/pmu`, `components/actigraphy`), since the managed chip components require IDF ≥5.5 and we're on 5.4. The PPG driver and first-pass PPG/DSP pipeline now run live on hardware (live HR + SpO2 via the external MAX30102 at `0x57`); only the epoch-assembler and scoring bodies remain stubbed and tagged `TODO(phaseN)`.
 
-**Next steps:** (1) MAX3010x PPG driver at `0x57` + the PPG pipeline (Phase 1 core — HR/SpO2); (2) epoch assembler + crash-safe microSD logging (Phase 2).
+**Next steps:** (1) epoch assembler + crash-safe microSD logging (Phase 2 recording); (2) power work — display-off light-sleep + wake-on-motion + duty-cycle scheduler (Phase 2).

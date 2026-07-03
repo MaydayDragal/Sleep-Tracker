@@ -19,9 +19,9 @@ A wrist-worn sleep tracker built on the [Waveshare ESP32-S3-Touch-AMOLED-1.8](ht
 
 The project is built in staged milestones (full detail + exit criteria in [PLAN.md §5](PLAN.md#5-milestones)):
 
-- **Phase 0 — Board bring-up:** boots into an LVGL screen, all I2C devices enumerate, runs untethered. *(Working on hardware — display + LVGL + touch + I2C enumeration all up via the managed Waveshare BSP. See [firmware/README.md](firmware/README.md).)*
+- **Phase 0 — Board bring-up:** boots into an LVGL screen, all I2C devices enumerate, runs untethered. *(Done and verified on hardware, merged to main — display + LVGL + touch + I2C enumeration all up via the managed Waveshare BSP. See [firmware/README.md](firmware/README.md).)*
 - *→ De-risk checks:* run VALIDATION spikes (power, SD, coupling); **S1** tells you whether the *optional* HRV feature is feasible — it doesn't gate the build.
-- **Phase 1 — Sensor drivers:** live HR / SpO2 / movement on screen (HRV optional, power-permitting).
+- **Phase 1 — Sensor drivers:** live HR / SpO2 / movement on screen (HRV optional, power-permitting). *(Done and verified on hardware — RTC, IMU, battery, and the external MAX30102 PPG all read live; HR / SpO2 from the PPG, movement from the IMU.)*
 - **Phase 2 — Recording pipeline:** records a full 8-hour night to microSD on battery.
 - **Phase 2.5 — Body-sensor network:** a paired torso WT9011DCL logs authoritative sleep position all night.
 - **Phase 3 — Sleep scoring:** hypnogram + score, position-resolved summaries (optional HRV check against ECG).
