@@ -12,6 +12,7 @@ typedef struct {
     float       accel_g;    // accelerometer magnitude
     int         hr_bpm;     // heart rate, 0 if no finger / not locked
     int         spo2;       // SpO2 %, 0 if unavailable
+    int         hrv_ms;     // live RMSSD (ms), 0 until enough beats
     bool        finger;     // PPG sensor covered
     int         batt_pct;   // 0..100, or -1 if unknown
     int         vbat_mv;    // battery voltage (mV)
