@@ -234,10 +234,11 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 ### Phase 3 — Sleep scoring
 **Goal:** score the night and break metrics down by body position (optionally validate HRV against ECG).
-- [ ] Actigraphy sleep/wake classifier; tune on recorded nights.
+*Status: an offline prototype of the whole scoring pipeline (sleep/wake + staging + metrics + score) lives in `tools/` and is validated on synthetic nights (~98% sleep/wake, ~85–90% 4-stage vs ground truth). Remaining: tune thresholds on real recorded nights, then port the re-pass into on-device `sleep_core`.*
+- [ ] Actigraphy sleep/wake classifier; tune on recorded nights. *(Prototyped in `tools/score_night.py` — Cole-Kripke-style; needs real-night tuning + on-device port.)*
 - [ ] Morning re-pass: stage refinement from HR/HRV, summary metrics, sleep score.
 - [ ] **Position-resolved summaries** — time-in-position (supine vs lateral vs prone), and position-segmented HR/SpO2/HRV, laying the groundwork for the positional-apnea correlation with CPAP data (INTEGRATION.md §6).
-- [ ] Offline analysis scripts (`tools/`, Python) to visualize logs and iterate on parameters.
+- [x] Offline analysis scripts (`tools/`, Python): `read_night.py` (log validator), `gen_synthetic_night.py` (synthetic nights + ground-truth hypnogram), and `score_night.py` (sleep/wake + staging + metrics + sleep score + SVG hypnogram + ground-truth validation). *Developed and verified against synthetic nights; the `--truth` loop is the harness for tuning on real data.*
 - [ ] (Optional, only if HRV is enabled) **HRV sanity-check against ECG** — record simultaneous sessions vs. a Polar H10, compare RMSSD/SDNN with Bland-Altman analysis; good agreement lets us surface HRV with confidence, poor agreement means we label it low-confidence or hide it. **Full protocol in [VALIDATION.md](VALIDATION.md).**
 - **Exit criteria:** hypnogram + score for a real night that roughly matches subjective experience / a reference tracker, **and** a per-night position breakdown with position-segmented SpO2. (If HRV is enabled, ECG agreement on clean windows is a bonus quality check, not a gate.)
 
