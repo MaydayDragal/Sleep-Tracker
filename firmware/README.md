@@ -2,7 +2,7 @@
 
 ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** (+ external MAX3010x PPG sensor: MAX30102 now → MAX30101 planned).
 
-**Status (Phases 0–1 done, verified on hardware):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The Phase 1 sensor + PPG bodies are now live on hardware — the PCF85063 RTC ticks, the QMI8658 reads ~1 g at rest, the AXP2101 reports battery, and the external MAX30102 yields live heart rate (~81 bpm) and SpO2 (98–99%). The remaining UI/recording/sync *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**).
+**Status (Phases 0–1 done; Phase 2 recording bench-validated on hardware):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The Phase 1 sensor + PPG bodies are now live on hardware — the PCF85063 RTC ticks, the QMI8658 reads ~1 g at rest, the AXP2101 reports battery, and the external MAX30102 yields live heart rate (~81 bpm) and SpO2 (98–99%). The remaining UI/recording/sync *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**). **Phase 2 recording is now bench-validated on hardware:** the microSD card mounts, a session opens the log file, continuous 30 s epochs are written to the card, and light-sleep engages in TRACKING (verified on **ESP-IDF v6.0.2**).
 
 ## Build / flash / monitor
 
@@ -29,7 +29,7 @@ pio device monitor         # serial monitor @ 115200
 
 ### Native ESP-IDF (alternative)
 
-Requires [ESP-IDF **v5.3+**](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/) (the managed Waveshare BSP needs ≥5.3; we build on 5.4) exported (`. $IDF_PATH/export.sh`). Apply the same `-Os` / `-Wno-error=format` workarounds noted above:
+Requires [ESP-IDF **v5.3+**](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/) (the managed Waveshare BSP needs ≥5.3). Verified building, flashing, and running on **5.4** and on **v6.0.2** (native, via the ESP-IDF Installation Manager / EIM, GCC 15.2) — on 6.0.2 the `-Os` workaround below still applies, and the RGB-driver ICE the PlatformIO note flags for 6.0.1 did **not** occur on native 6.0.2. Export the environment (`. $IDF_PATH/export.sh`, or `export.ps1` on Windows), then apply the same `-Os` / `-Wno-error=format` workarounds noted above:
 
 ```bash
 cd firmware
