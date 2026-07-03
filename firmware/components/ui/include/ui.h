@@ -26,5 +26,9 @@ esp_err_t ui_init(void);
 // a no-op until ui_init() has built the screen.
 void ui_set_status(const ui_status_t *s);
 
+// Refresh the live PPG waveform graph from ppg_copy_waveform(). Call from the
+// sensor task at ~display rate (it reads the same task's PPG ring buffer).
+void ui_update_waveform(void);
+
 // Pump the UI once per loop iteration (no-op: LVGL runs on the esp_lvgl_port task).
 void ui_tick(void);
