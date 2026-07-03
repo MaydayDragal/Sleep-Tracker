@@ -1,0 +1,773 @@
+<title>Sleep Tracker — Watch UI</title>
+<style>
+  :root{
+    /* ground / surfaces — cool navy biased toward the indigo accent */
+    --screen:#000000;
+    --surf-0:#0B0F17;
+    --surf-1:#101827;
+    --surf-2:#17233a;
+    --hair:#233150;
+    --hair-soft:#1a2438;
+    /* ink */
+    --ink:#EEF2FA;
+    --ink-2:#93A0B8;
+    --ink-3:#5A6782;
+    /* accent + status */
+    --accent:#7B74F0;
+    --accent-2:#48C9E8;
+    --good:#3FC492;
+    --warn:#D9A03C;
+    --crit:#E8595E;
+    /* validated sleep-stage categorical set */
+    --deep:#4C6BF0;
+    --light:#2F9FB8;
+    --rem:#9A63DE;
+    --awake:#CB7B30;
+    /* biometric lines */
+    --hr:#FF6E8A;
+    --spo2:#48C9E8;
+
+    --font-display:"SF Pro Display","Segoe UI Variable","Segoe UI",system-ui,Roboto,"Helvetica Neue",sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Cascadia Code","Segoe UI Mono","Roboto Mono",monospace;
+
+    --page-bg:#05070d;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 620px at 50% -8%, #141a33 0%, rgba(10,13,26,0) 60%),
+      radial-gradient(700px 500px at 88% 108%, #10182b 0%, rgba(5,7,13,0) 55%),
+      var(--page-bg);
+    color:var(--ink);
+    font-family:var(--font-display);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    min-height:100vh;
+    overflow-x:hidden;
+    padding:34px 18px 60px;
+  }
+
+  /* ---------- page chrome ---------- */
+  .wrap{max-width:900px;margin:0 auto;display:flex;flex-direction:column;align-items:center}
+  .masthead{display:flex;align-items:center;gap:13px;margin-bottom:4px}
+  .glyph{width:34px;height:34px;flex:0 0 auto}
+  .brand{display:flex;flex-direction:column;line-height:1}
+  .brand b{font-size:20px;font-weight:650;letter-spacing:.14em;text-transform:uppercase}
+  .brand span{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);letter-spacing:.06em;margin-top:5px}
+  .lede{max-width:560px;text-align:center;color:var(--ink-2);font-size:14.5px;line-height:1.55;margin:14px 0 26px;text-wrap:balance}
+  .lede b{color:var(--ink);font-weight:600}
+
+  /* ---------- device ---------- */
+  .device-scale{transform:scale(min(1, calc((100vw - 30px) / 410)));transform-origin:top center}
+  .device{
+    position:relative;width:410px;height:496px;border-radius:62px;padding:24px 21px;
+    background:linear-gradient(150deg,#242833 0%,#14161d 42%,#0a0b10 100%);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,.05),
+      0 1px 1px 1px rgba(255,255,255,.06) inset,
+      0 40px 90px -30px rgba(0,0,0,.9),
+      0 0 70px -10px rgba(90,80,220,.22);
+  }
+  /* strap lugs */
+  .device::before,.device::after{
+    content:"";position:absolute;left:50%;transform:translateX(-50%);width:150px;height:34px;z-index:-1;
+    background:linear-gradient(#20232c,#15171d);border-radius:14px;
+  }
+  .device::before{top:-20px}
+  .device::after{bottom:-20px}
+  /* side crown */
+  .crown{position:absolute;right:-6px;top:188px;width:7px;height:64px;border-radius:4px;
+    background:linear-gradient(90deg,#31353f,#191b21);box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+  .crown.b2{top:270px;height:40px}
+
+  .screen{
+    position:relative;width:368px;height:448px;border-radius:46px;overflow:hidden;
+    background:var(--screen);color:var(--ink);
+    box-shadow:0 0 0 1px #000, 0 0 22px rgba(0,0,0,.6) inset;
+  }
+  .scr{position:absolute;inset:0;display:none;flex-direction:column;padding:0}
+  .scr.on{display:flex}
+  @media (prefers-reduced-motion:no-preference){
+    .scr.on{animation:fade .45s ease}
+    @keyframes fade{from{opacity:0}to{opacity:1}}
+  }
+
+  /* shared slim header */
+  .hdr{display:flex;align-items:center;gap:8px;padding:20px 22px 8px;flex:0 0 auto}
+  .hdr .back{color:var(--ink-3);font-size:17px;line-height:1}
+  .hdr .title{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);font-weight:600}
+  .hdr .batt{margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
+  .batt .cell{width:22px;height:11px;border:1.4px solid var(--ink-3);border-radius:3px;position:relative;padding:1.5px}
+  .batt .cell::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:5px;background:var(--ink-3);border-radius:0 1px 1px 0}
+  .batt .fill{height:100%;width:82%;background:var(--good);border-radius:1px;display:block}
+  .body{flex:1 1 auto;padding:6px 22px 22px;display:flex;flex-direction:column;min-height:0}
+
+  .eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .num{font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+  /* ---------- watch face ---------- */
+  .wf{align-items:center;justify-content:center;text-align:center;gap:0;padding:0 26px}
+  .wf .moon{position:absolute;top:34px;left:50%;transform:translateX(-50%);opacity:.9}
+  .wf .clock{font-size:92px;font-weight:600;line-height:.92;margin-top:6px}
+  .wf .clock small{font-size:34px;color:var(--ink-2);font-weight:500}
+  .wf .date{font-family:var(--font-mono);font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin-top:12px}
+  .wf .lastnight{margin-top:26px;display:flex;align-items:center;gap:12px;background:var(--surf-1);border:1px solid var(--hair-soft);
+    border-radius:18px;padding:12px 16px}
+  .wf .lastnight .sc{font-size:30px;font-weight:650;color:var(--good)}
+  .wf .lastnight .meta{text-align:left;line-height:1.3}
+  .wf .lastnight .meta b{font-size:13px;font-weight:600}
+  .wf .lastnight .meta span{display:block;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+  .wf .vit{margin-top:18px;display:flex;gap:26px;color:var(--ink-2);font-size:14px}
+  .wf .vit b{color:var(--ink);font-weight:600}
+  .wf .start{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--ink-3);
+    border:1px solid var(--hair);border-radius:20px;padding:9px 18px}
+  .wf .start b{color:var(--accent)}
+
+  /* ---------- generic stat grid ---------- */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .tile{background:var(--surf-1);border:1px solid var(--hair-soft);border-radius:16px;padding:13px 14px}
+  .tile .k{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+  .tile .v{font-size:23px;font-weight:600;margin-top:5px}
+  .tile .v small{font-size:13px;color:var(--ink-2);font-weight:500;margin-left:2px}
+  .tile .v .unit{font-size:12px;color:var(--ink-3);font-family:var(--font-mono)}
+
+  /* ---------- live vitals ---------- */
+  .live .hero{display:flex;align-items:flex-end;gap:10px;margin-top:2px}
+  .live .hero .big{font-size:74px;font-weight:650;line-height:.86;color:var(--hr)}
+  .live .hero .u{font-size:15px;color:var(--ink-2);margin-bottom:12px;font-family:var(--font-mono)}
+  .live .hero .heart{margin-left:auto;margin-bottom:8px;color:var(--hr)}
+  canvas.ppg{width:100%;height:66px;display:block;margin:8px 0 14px}
+  .sqi{display:flex;align-items:center;gap:8px;margin-top:2px;font-size:13px;color:var(--ink-2)}
+  .sqi .dots{display:flex;gap:3px}
+  .sqi .dots i{width:7px;height:7px;border-radius:50%;background:var(--hair);display:block}
+  .sqi .dots i.on{background:var(--good)}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;
+    padding:4px 9px;border-radius:20px;border:1px solid var(--hair);color:var(--ink-2)}
+  .chip .d{width:7px;height:7px;border-radius:50%}
+
+  /* ---------- tracking ---------- */
+  .trk{align-items:center;text-align:center;justify-content:center}
+  .trk .rec{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--crit)}
+  .trk .rec .dot{width:10px;height:10px;border-radius:50%;background:var(--crit)}
+  @media (prefers-reduced-motion:no-preference){.trk .rec .dot{animation:pulse 1.9s ease-in-out infinite}}
+  @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(232,89,94,.5)}50%{opacity:.4;box-shadow:0 0 0 8px rgba(232,89,94,0)}}
+  .trk .cl{font-size:76px;font-weight:600;margin:20px 0 4px;color:var(--ink)}
+  .trk .sub{font-family:var(--font-mono);font-size:12px;color:var(--ink-3);letter-spacing:.08em}
+  .trk .row{display:flex;gap:12px;margin-top:26px}
+  .trk .row .c{flex:1;background:var(--surf-1);border:1px solid var(--hair-soft);border-radius:14px;padding:11px 6px}
+  .trk .row .c .k{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase}
+  .trk .row .c .v{font-size:20px;font-weight:600;margin-top:4px}
+  .trk .hint{position:absolute;bottom:26px;left:0;right:0;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+  .trk .hint b{color:var(--accent-2)}
+
+  /* ---------- score ring ---------- */
+  .scorewrap{display:flex;flex-direction:column;align-items:center;margin-top:2px}
+  .ring{position:relative;width:172px;height:172px}
+  .ring .lbl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ring .lbl .n{font-size:52px;font-weight:680;line-height:1}
+  .ring .lbl .g{font-family:var(--font-mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--good);margin-top:3px}
+  .ring .lbl .o{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);margin-top:2px}
+
+  /* stacked stage bar + legend */
+  .stagebar{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:transparent;margin-top:4px}
+  .stagebar i{display:block;height:100%;border-radius:3px}
+  .legend{display:grid;grid-template-columns:1fr 1fr;gap:7px 14px;margin-top:14px}
+  .legend .li{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2)}
+  .legend .li .sw{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
+  .legend .li b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+  .legend .li span{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+
+  /* ---------- charts ---------- */
+  .card{background:var(--surf-0);border:1px solid var(--hair-soft);border-radius:18px;padding:12px 12px 8px}
+  .card .caption{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .card .caption .t{font-size:13px;font-weight:600}
+  .card .caption .s{font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+  .axislbl{font-family:var(--font-mono);font-size:9px;fill:var(--ink-3)}
+  svg{display:block;width:100%;overflow:visible}
+  .tip{position:absolute;pointer-events:none;opacity:0;transform:translate(-50%,-120%);
+    background:var(--surf-2);border:1px solid var(--hair);border-radius:9px;padding:6px 9px;
+    font-family:var(--font-mono);font-size:10.5px;color:var(--ink);white-space:nowrap;transition:opacity .1s;z-index:5}
+  .tip b{color:var(--accent-2)}
+
+  /* ---------- position ---------- */
+  .posrow{display:flex;align-items:center;gap:6px;margin-top:11px}
+  .posrow .nm{width:52px;font-size:12.5px;color:var(--ink-2)}
+  .posrow .track{flex:1;height:12px;background:var(--surf-1);border-radius:6px;overflow:hidden}
+  .posrow .track i{display:block;height:100%;border-radius:6px}
+  .posrow .pc{width:40px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .insight{margin-top:16px;background:var(--surf-1);border:1px solid var(--hair-soft);border-left:3px solid var(--warn);
+    border-radius:12px;padding:11px 13px;font-size:12.5px;line-height:1.5;color:var(--ink-2)}
+  .insight b{color:var(--ink)}
+
+  /* ---------- history ---------- */
+  .histbars{display:flex;align-items:flex-end;justify-content:space-between;height:132px;gap:8px;margin-top:6px;padding:0 2px}
+  .histbars .b{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .histbars .b .bar{width:100%;max-width:26px;border-radius:6px 6px 3px 3px;background:var(--accent)}
+  .histbars .b .d{font-family:var(--font-mono);font-size:10px;color:var(--ink-3)}
+  .histbars .b .sv{font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  .spark{display:flex;gap:12px;margin-top:12px}
+  .spark .sp{flex:1;background:var(--surf-0);border:1px solid var(--hair-soft);border-radius:14px;padding:10px 11px}
+  .spark .sp .k{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase}
+  .spark .sp .v{font-size:19px;font-weight:600;margin-top:2px}
+  .spark .sp .v small{font-size:11px;color:var(--ink-3);font-family:var(--font-mono)}
+
+  /* ---------- alarm / settings rows ---------- */
+  .arow{display:flex;align-items:center;gap:12px;padding:13px 2px;border-bottom:1px solid var(--hair-soft)}
+  .arow:last-child{border-bottom:0}
+  .arow .k{font-size:13.5px}
+  .arow .k small{display:block;font-family:var(--font-mono);font-size:11px;color:var(--ink-3);margin-top:3px}
+  .arow .v{margin-left:auto;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .arow .v.big{font-size:22px;font-weight:600}
+  .tog{width:48px;height:28px;border-radius:14px;background:var(--surf-2);position:relative;flex:0 0 auto}
+  .tog.on{background:var(--accent)}
+  .tog i{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .15s}
+  .tog.on i{left:23px}
+  .slider{margin-left:auto;width:132px;height:8px;border-radius:4px;background:var(--surf-2);position:relative}
+  .slider i{position:absolute;left:0;top:0;height:100%;width:64%;background:var(--accent);border-radius:4px}
+  .slider i::after{content:"";position:absolute;right:-9px;top:-6px;width:20px;height:20px;border-radius:50%;background:#fff}
+  .sleep-btn{width:100%;margin-top:16px;padding:15px;border:0;border-radius:14px;background:var(--surf-2);color:var(--ink);font-family:var(--font-display);font-size:16px;font-weight:600;cursor:pointer}
+  .sleep-btn:hover{background:#1e2a44}
+  .arow.tall{padding:15px 2px}
+  .screen-dim{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .35s;z-index:10;display:flex;align-items:flex-end;justify-content:center}
+  .screen-dim.on{opacity:.985;pointer-events:auto}
+  .screen-dim::after{content:"double-tap to wake";color:#3a4256;font-family:var(--font-mono);font-size:11px;margin-bottom:40px}
+  .alarm-big{text-align:center;margin:6px 0 4px}
+  .alarm-big .t{font-size:60px;font-weight:600}
+  .alarm-big .in{font-family:var(--font-mono);font-size:12px;color:var(--ink-3);margin-top:4px}
+  .pill-ok{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--good)}
+  .pill-ok .d{width:7px;height:7px;border-radius:50%;background:var(--good)}
+
+  /* ---------- navigator ---------- */
+  .nav{margin-top:34px;width:100%;max-width:640px}
+  .nav .grp{margin-bottom:14px}
+  .nav .grp .gl{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:9px;text-align:center}
+  .nav .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .chipbtn{font-family:var(--font-display);font-size:13px;color:var(--ink-2);background:var(--surf-1);
+    border:1px solid var(--hair-soft);border-radius:22px;padding:8px 15px;cursor:pointer;transition:.15s;line-height:1}
+  .chipbtn:hover{border-color:var(--hair);color:var(--ink)}
+  .chipbtn.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .chipbtn:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px}
+  .caption-line{margin:22px auto 0;max-width:520px;text-align:center;color:var(--ink-2);font-size:13.5px;line-height:1.55;min-height:42px}
+  .caption-line b{color:var(--ink);font-weight:600}
+  .gesture{margin-top:8px;font-family:var(--font-mono);font-size:11px;color:var(--ink-3);text-align:center}
+  footer{margin-top:40px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:11px;line-height:1.7;max-width:560px}
+  footer b{color:var(--ink-2)}
+</style>
+
+<div class="wrap">
+  <div class="masthead">
+    <svg class="glyph" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+      <circle cx="20" cy="20" r="19" stroke="#2a3350" stroke-width="1.5"/>
+      <path d="M25.5 26.5A9 9 0 0 1 16 12a9 9 0 1 0 9.5 14.5Z" fill="#7B74F0"/>
+      <circle cx="27" cy="14" r="1.4" fill="#48C9E8"/>
+      <circle cx="31" cy="18" r="1" fill="#9A63DE"/>
+    </svg>
+    <div class="brand"><b>Sleep&nbsp;Tracker</b><span>watch ui · concept</span></div>
+  </div>
+  <p class="lede">The on-device interface for the wrist tracker, designed at the panel's real
+    <b>368 × 448</b> CO5300 AMOLED resolution. True-black ground, validated colorblind-safe
+    sleep-stage palette. <b>Tap a screen below</b> to explore all ten.</p>
+
+  <div class="device-scale">
+  <div class="device">
+    <span class="crown"></span><span class="crown b2"></span>
+    <div class="screen" id="screen">
+
+      <!-- 1. WATCH FACE -->
+      <section class="scr on" data-scr="watch">
+        <div class="body wf">
+          <svg class="moon" width="30" height="30" viewBox="0 0 30 30" fill="none">
+            <path d="M21 22A9 9 0 0 1 12 7a9 9 0 1 0 9 15Z" fill="#7B74F0" opacity=".85"/>
+          </svg>
+          <div class="clock num">23:47</div>
+          <div class="date">Wed · Jul 3</div>
+          <div class="lastnight">
+            <div class="sc num">82</div>
+            <div class="meta"><b>Last night</b><span>7h 12m · Good</span></div>
+          </div>
+          <div class="vit"><div>RHR <b class="num">54</b></div><div>SpO₂ <b class="num">96%</b></div></div>
+          <div class="start">Unplug to <b>start sleep</b></div>
+        </div>
+      </section>
+
+      <!-- 2. LIVE VITALS -->
+      <section class="scr" data-scr="live">
+        <div class="hdr"><span class="title">Live vitals</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body live">
+          <div class="eyebrow">Heart rate</div>
+          <div class="hero">
+            <div class="big num">62</div><div class="u">bpm</div>
+            <svg class="heart" width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11Z"/></svg>
+          </div>
+          <canvas class="ppg" id="ppg" width="640" height="132"></canvas>
+          <div class="grid2">
+            <div class="tile"><div class="k">SpO₂</div><div class="v num">97<small>%</small></div></div>
+            <div class="tile"><div class="k">HRV · rmssd</div><div class="v num">48<span class="unit"> ms</span></div></div>
+          </div>
+          <div class="sqi">
+            <span>Signal quality</span>
+            <span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>
+            <span style="color:var(--good)">Good</span>
+            <span class="chip" style="margin-left:auto"><span class="d" style="background:var(--good)"></span>Wrist contact</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. TRACKING -->
+      <section class="scr" data-scr="tracking">
+        <div class="body trk">
+          <div class="rec"><span class="dot"></span>Recording</div>
+          <div class="cl num">03:24</div>
+          <div class="sub">Tracking night · started 23:33</div>
+          <div class="row">
+            <div class="c"><div class="k">Elapsed</div><div class="v num">3h 51m</div></div>
+            <div class="c"><div class="k">Heart</div><div class="v num">51</div></div>
+            <div class="c"><div class="k">Position</div><div class="v" style="font-size:15px">Right</div></div>
+          </div>
+          <div class="hint">Screen off to save power · <b>double-tap to wake</b> · plug in to stop</div>
+        </div>
+      </section>
+
+      <!-- 4. REPORT · SCORE -->
+      <section class="scr" data-scr="score">
+        <div class="hdr"><span class="back">‹</span><span class="title">Morning report</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body">
+          <div class="scorewrap">
+            <div class="ring">
+              <svg viewBox="0 0 120 120" width="172" height="172">
+                <circle cx="60" cy="60" r="52" fill="none" stroke="#17233a" stroke-width="11"/>
+                <circle id="scoreArc" cx="60" cy="60" r="52" fill="none" stroke="url(#sg)" stroke-width="11"
+                  stroke-linecap="round" transform="rotate(-90 60 60)"/>
+                <defs><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#3FC492"/><stop offset="1" stop-color="#48C9E8"/></linearGradient></defs>
+              </svg>
+              <div class="lbl"><div class="n num">82</div><div class="g">Good</div><div class="o">sleep score</div></div>
+            </div>
+          </div>
+          <div class="stagebar" id="stagebar" style="margin-top:18px"></div>
+          <div class="grid2" style="margin-top:16px">
+            <div class="tile"><div class="k">Time asleep</div><div class="v num">7h 12m</div></div>
+            <div class="tile"><div class="k">Efficiency</div><div class="v num">92<small>%</small></div></div>
+            <div class="tile"><div class="k">Onset latency</div><div class="v num">14<span class="unit"> min</span></div></div>
+            <div class="tile"><div class="k">Awake (waso)</div><div class="v num">22<span class="unit"> min · 3×</span></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. REPORT · HYPNOGRAM -->
+      <section class="scr" data-scr="hypnogram">
+        <div class="hdr"><span class="back">‹</span><span class="title">Hypnogram</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body">
+          <div class="card" style="position:relative">
+            <div class="caption"><span class="t">Sleep stages</span><span class="s">23:33 → 07:21</span></div>
+            <div id="hypno"></div>
+            <div class="tip" id="hypnoTip"></div>
+          </div>
+          <div class="legend" id="hypLegend" style="margin-top:16px"></div>
+        </div>
+      </section>
+
+      <!-- 6. REPORT · HEART & O2 -->
+      <section class="scr" data-scr="heart">
+        <div class="hdr"><span class="back">‹</span><span class="title">Heart &amp; O₂</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body">
+          <div class="card" style="position:relative">
+            <div class="caption"><span class="t" style="color:var(--hr)">Heart rate</span><span class="s">avg 56 · min 49 · max 71 bpm</span></div>
+            <div id="hrChart"></div>
+            <div class="tip" id="hrTip"></div>
+          </div>
+          <div class="card" style="position:relative;margin-top:12px">
+            <div class="caption"><span class="t" style="color:var(--spo2)">Blood oxygen</span><span class="s">avg 96% · min 89% · 2 dips</span></div>
+            <div id="spo2Chart"></div>
+            <div class="tip" id="spo2Tip"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. POSITION -->
+      <section class="scr" data-scr="position">
+        <div class="hdr"><span class="back">‹</span><span class="title">Body position</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body">
+          <div style="display:flex;align-items:center;gap:16px;margin-top:4px">
+            <div class="ring" style="width:118px;height:118px">
+              <svg viewBox="0 0 120 120" width="118" height="118" id="posRing"></svg>
+              <div class="lbl"><div class="n num" style="font-size:30px">41<small style="font-size:15px">%</small></div><div class="o">on back</div></div>
+            </div>
+            <div style="flex:1">
+              <div class="eyebrow">Torso sensor</div>
+              <div class="pill-ok" style="margin-top:6px"><span class="d"></span>Connected · 88%</div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-3);margin-top:8px">14 position changes</div>
+            </div>
+          </div>
+          <div style="margin-top:18px">
+            <div class="posrow"><span class="nm">Back</span><span class="track"><i style="width:41%;background:var(--warn)"></i></span><span class="pc">41%</span></div>
+            <div class="posrow"><span class="nm">Right</span><span class="track"><i style="width:33%;background:var(--accent)"></i></span><span class="pc">33%</span></div>
+            <div class="posrow"><span class="nm">Left</span><span class="track"><i style="width:21%;background:var(--accent-2)"></i></span><span class="pc">21%</span></div>
+            <div class="posrow"><span class="nm">Front</span><span class="track"><i style="width:5%;background:var(--rem)"></i></span><span class="pc">5%</span></div>
+          </div>
+          <div class="insight">Both SpO₂ dips &lt; 90% happened while <b>on your back</b> — supine time is worth watching.</div>
+        </div>
+      </section>
+
+      <!-- 8. HISTORY -->
+      <section class="scr" data-scr="history">
+        <div class="hdr"><span class="title">7-night history</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body">
+          <div style="display:flex;align-items:baseline;gap:10px">
+            <div style="font-size:38px;font-weight:650" class="num">78</div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-3)">avg score<br>best 86 · worst 64</div>
+          </div>
+          <div class="histbars" id="histbars"></div>
+          <div class="spark">
+            <div class="sp"><div class="k">Resting HR</div><div class="v num">54 <small>bpm ↘</small></div></div>
+            <div class="sp"><div class="k">HRV trend</div><div class="v num">46 <small>ms ↗</small></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9. ALARM -->
+      <section class="scr" data-scr="alarm">
+        <div class="hdr"><span class="title">Smart alarm</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body">
+          <div class="alarm-big"><div class="t num">06:45</div><div class="in">rings in 7h 02m</div></div>
+          <div style="margin-top:10px">
+            <div class="arow"><div class="k">Smart window<small>wake at lightest sleep, 06:15–06:45</small></div><span class="tog on"><i></i></span></div>
+            <div class="arow"><div class="k">Gradual wake<small>screen brightens, tones escalate</small></div><span class="tog on"><i></i></span></div>
+            <div class="arow"><div class="k">Sound<small>through the ES8311 speaker</small></div><span class="v">Dawn</span></div>
+            <div class="arow"><div class="k">Vibration<small>needs haptic motor (expansion)</small></div><span class="tog"><i></i></span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10. SETTINGS -->
+      <section class="scr" data-scr="settings">
+        <div class="hdr"><span class="title">Settings</span>
+          <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
+        <div class="body" style="overflow-y:auto">
+          <div class="arow tall"><div class="k">Brightness</div><span class="slider"><i></i></span></div>
+          <div class="arow tall"><div class="k">Display timeout<small>auto-blank after inactivity</small></div><span class="v">30 s</span></div>
+          <div class="arow tall"><div class="k">Dim night clock<small>faint clock on tap while tracking</small></div><span class="tog on"><i></i></span></div>
+          <div class="arow tall"><div class="k">Start / stop mode<small>unplug from charger = track</small></div><span class="v">VBUS</span></div>
+          <div class="arow tall"><div class="k">Auto sleep detect<small>start a night without unplugging</small></div><span class="tog"><i></i></span></div>
+          <div class="arow tall"><div class="k">Double-tap to wake<small>blank screen, 2 taps to light it</small></div><span class="tog on"><i></i></span></div>
+          <div class="arow tall"><div class="k">HRV capture<small>longer clean windows (uses power)</small></div><span class="tog"><i></i></span></div>
+          <div class="arow tall"><div class="k">Do not disturb<small>silence alarms and tones</small></div><span class="tog on"><i></i></span></div>
+          <div class="arow tall"><div class="k">Wi-Fi sync<small>upload nights to your dashboard</small></div><span class="tog"><i></i></span></div>
+          <div class="arow tall"><div class="k">Body sensors<small>WT9011DCL over BLE</small></div><span class="v">1 paired</span></div>
+          <div class="arow tall"><div class="k">Sensors<small>PPG · IMU · RTC · body ×1</small></div><span class="pill-ok"><span class="d"></span>All OK</span></div>
+          <div class="arow tall"><div class="k">microSD<small>night logs</small></div><span class="v">2.1 GB</span></div>
+          <div class="arow tall"><div class="k">Time &amp; date<small>from the RTC</small></div><span class="v">Jul 3</span></div>
+          <div class="arow tall"><div class="k">Firmware<small>Sleep Tracker</small></div><span class="v" style="color:var(--ink-3)">v0.4.0</span></div>
+          <button class="sleep-btn">Sleep display</button>
+        </div>
+      </section>
+
+      <!-- display-sleep demo: "Sleep display" blanks this; double-tap to wake -->
+      <div class="screen-dim" id="screenDim"></div>
+    </div>
+  </div>
+  </div>
+
+  <!-- NAVIGATOR -->
+  <nav class="nav" aria-label="Screen selector">
+    <div class="grp">
+      <div class="gl">Home</div>
+      <div class="chips">
+        <button class="chipbtn active" data-go="watch">Watch face</button>
+        <button class="chipbtn" data-go="live">Live vitals</button>
+        <button class="chipbtn" data-go="tracking">Tracking</button>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="gl">Morning report</div>
+      <div class="chips">
+        <button class="chipbtn" data-go="score">Score</button>
+        <button class="chipbtn" data-go="hypnogram">Hypnogram</button>
+        <button class="chipbtn" data-go="heart">Heart &amp; O₂</button>
+        <button class="chipbtn" data-go="position">Position</button>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="gl">More</div>
+      <div class="chips">
+        <button class="chipbtn" data-go="history">History</button>
+        <button class="chipbtn" data-go="alarm">Alarm</button>
+        <button class="chipbtn" data-go="settings">Settings</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="caption-line" id="caption"></div>
+  <div class="gesture" id="gesture"></div>
+
+  <footer>
+    <b>Design spec</b> · 368×448 · CO5300 QSPI AMOLED · FT3168 touch · LVGL 9<br>
+    Built on-device as an 11-tile LVGL app (Phase 4 shell): watch / live vitals / tracking wired to real
+    sensors (+ an on-device PPG-debug tile not shown here); report / position / history render this sample
+    night pending on-device scoring &amp; Phase 2.5 body sensors.<br>
+    Stage palette validated CVD-safe (worst ΔE 29.7, target 12).
+  </footer>
+</div>
+
+<script>
+(() => {
+  const C = {
+    deep:'#4C6BF0', light:'#2F9FB8', rem:'#9A63DE', awake:'#CB7B30',
+    ink3:'#5A6782', hair:'#1a2438', hr:'#FF6E8A', spo2:'#48C9E8',
+    crit:'#E8595E', good:'#3FC492'
+  };
+  const START = 23*60+33;               // 23:33 in minutes
+  const TIB = 468;                      // minutes in bed
+  const fmt = m => { let t=(START+m)%1440; return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0'); };
+
+  // stage lane index: awake=0 (top) rem=1 light=2 deep=3 (bottom)
+  const LANE = { A:0, R:1, L:2, D:3 };
+  const NAME = { A:'Awake', R:'REM', L:'Light', D:'Deep' };
+  const COL  = { A:C.awake, R:C.rem, L:C.light, D:C.deep };
+  const seg = [
+    [0,14,'A'],[14,32,'L'],[32,58,'D'],[58,72,'L'],[72,86,'R'],[86,92,'A'],
+    [92,110,'L'],[110,140,'D'],[140,156,'L'],[156,178,'R'],[178,200,'L'],
+    [200,210,'D'],[210,228,'L'],[228,252,'R'],[252,260,'A'],[260,286,'L'],
+    [286,300,'D'],[300,318,'L'],[318,344,'R'],[344,366,'L'],[366,378,'D'],
+    [378,398,'L'],[398,424,'R'],[424,432,'A'],[432,452,'L'],[452,468,'R']
+  ];
+  const totals = {A:0,R:0,L:0,D:0};
+  seg.forEach(([a,b,s]) => totals[s]+=b-a);
+  const TST = totals.R+totals.L+totals.D;
+
+  // ---- HYPNOGRAM ----
+  (() => {
+    const W=336,H=150,padL=22,padR=6,padT=6,padB=20;
+    const pw=W-padL-padR, ph=H-padT-padB, laneH=ph/4;
+    const sx = m => padL + m/TIB*pw;
+    let s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Sleep hypnogram">';
+    // lane guides + labels
+    ['A','R','L','D'].forEach((k,i)=>{
+      const y=padT+i*laneH+laneH/2;
+      s+='<line x1="'+padL+'" y1="'+(padT+i*laneH+laneH)+'" x2="'+(W-padR)+'" y2="'+(padT+i*laneH+laneH)+'" stroke="'+C.hair+'" stroke-width="1"/>';
+      s+='<text x="4" y="'+(y+3)+'" class="axislbl">'+k+'</text>';
+    });
+    // segments as rounded blocks in their lane
+    seg.forEach(([a,b,st])=>{
+      const x=sx(a), w=Math.max(sx(b)-sx(a),2), y=padT+LANE[st]*laneH+4, h=laneH-8;
+      s+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+h.toFixed(1)+'" rx="2.5" fill="'+COL[st]+'"/>';
+    });
+    // time ticks
+    for(let m=0;m<=TIB;m+=120){
+      s+='<text x="'+sx(m).toFixed(1)+'" y="'+(H-6)+'" class="axislbl" text-anchor="middle">'+fmt(m)+'</text>';
+    }
+    // crosshair
+    s+='<line id="hypX" x1="0" y1="'+padT+'" x2="0" y2="'+(padT+ph)+'" stroke="#48C9E8" stroke-width="1" opacity="0"/>';
+    s+='<rect id="hypHit" x="'+padL+'" y="'+padT+'" width="'+pw+'" height="'+ph+'" fill="transparent"/></svg>';
+    const host=document.getElementById('hypno'); host.innerHTML=s;
+    // legend
+    const leg=document.getElementById('hypLegend');
+    [['D','Deep'],['R','REM'],['L','Light'],['A','Awake']].forEach(([k,nm])=>{
+      const mins=totals[k], pct=Math.round(mins/(k==='A'?TIB:TST)*100);
+      const h=Math.floor(mins/60), mm=mins%60;
+      const el=document.createElement('div'); el.className='li';
+      el.innerHTML='<span class="sw" style="background:'+COL[k]+'"></span>'+nm+' <b>&nbsp;'+(h?h+'h ':'')+mm+'m</b><span>'+pct+'%</span>';
+      leg.appendChild(el);
+    });
+    // interaction
+    const tip=document.getElementById('hypnoTip'), xline=document.getElementById('hypX'), hit=document.getElementById('hypHit');
+    const svg=host.querySelector('svg');
+    const stageAt = m => { for(const [a,b,st] of seg) if(m>=a&&m<b) return st; return 'A'; };
+    function move(ev){
+      const r=svg.getBoundingClientRect(), sc=W/r.width;
+      const px=(ev.clientX-r.left)*sc; if(px<padL||px>W-padR){leave();return;}
+      const m=(px-padL)/pw*TIB, st=stageAt(m);
+      xline.setAttribute('x1',px);xline.setAttribute('x2',px);xline.setAttribute('opacity','1');
+      tip.style.opacity=1;
+      tip.style.left=((px/sc)+ (r.left-host.getBoundingClientRect().left))+'px';
+      tip.style.top='34px';
+      tip.innerHTML='<b>'+fmt(m)+'</b> · '+NAME[st];
+    }
+    function leave(){xline.setAttribute('opacity','0');tip.style.opacity=0;}
+    hit.addEventListener('pointermove',move);hit.addEventListener('pointerleave',leave);
+  })();
+
+  // ---- HR + SpO2 series ----
+  const base={A:66,R:60,L:56,D:50};
+  const stageAtMin = m => { for(const [a,b,st] of seg) if(m>=a&&m<b) return st; return 'A'; };
+  const N=Math.floor(TIB/3);
+  const hr=[], spo2=[];
+  for(let i=0;i<=N;i++){
+    const m=i*3, st=stageAtMin(m);
+    const drift=-3*Math.sin(Math.PI*m/TIB);        // slight dip mid-night
+    const noise=1.6*Math.sin(m*0.7)+1.1*Math.sin(m*0.23);
+    hr.push({m, v: base[st]+drift+noise});
+    let o=97 - (st==='A'?0:st==='R'?1:0.4);
+    if(m>=232&&m<=250) o=89+2*Math.abs(Math.sin((m-232)/18*Math.PI)); // dip 1
+    if(m>=404&&m<=420) o=90+2*Math.abs(Math.sin((m-404)/16*Math.PI)); // dip 2
+    o+=0.4*Math.sin(m*0.5);
+    spo2.push({m, v:o});
+  }
+
+  function lineChart(hostId,tipId,data,{color,min,max,fmtV,dips}){
+    const W=336,H=92,padL=6,padR=6,padT=8,padB=16;
+    const pw=W-padL-padR, ph=H-padT-padB;
+    const sx=m=>padL+m/TIB*pw, sy=v=>padT+ph-(v-min)/(max-min)*ph;
+    let d='',area='';
+    data.forEach((p,i)=>{d+=(i?'L':'M')+sx(p.m).toFixed(1)+' '+sy(p.v).toFixed(1)+' ';});
+    area='M'+sx(data[0].m).toFixed(1)+' '+(padT+ph)+' '+d.replace(/^M/,'L')+'L'+sx(data[data.length-1].m).toFixed(1)+' '+(padT+ph)+' Z';
+    const gid=hostId+'g';
+    let s='<svg viewBox="0 0 '+W+' '+H+'" role="img">';
+    s+='<defs><linearGradient id="'+gid+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+color+'" stop-opacity=".28"/><stop offset="1" stop-color="'+color+'" stop-opacity="0"/></linearGradient></defs>';
+    // gridlines
+    for(let g=0;g<=2;g++){const y=padT+g*ph/2;s+='<line x1="'+padL+'" y1="'+y+'" x2="'+(W-padR)+'" y2="'+y+'" stroke="'+C.hair+'" stroke-width="1"/>';}
+    s+='<path d="'+area+'" fill="url(#'+gid+')"/>';
+    s+='<path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    (dips||[]).forEach(dp=>{s+='<circle cx="'+sx(dp).toFixed(1)+'" cy="'+sy(data.reduce((a,b)=>Math.abs(b.m-dp)<Math.abs(a.m-dp)?b:a).v).toFixed(1)+'" r="3.2" fill="'+C.crit+'"/>';});
+    // endpoint
+    const last=data[data.length-1];
+    s+='<circle cx="'+sx(last.m).toFixed(1)+'" cy="'+sy(last.v).toFixed(1)+'" r="3" fill="'+color+'"/>';
+    s+='<line id="'+hostId+'X" x1="0" y1="'+padT+'" x2="0" y2="'+(padT+ph)+'" stroke="'+color+'" stroke-width="1" opacity="0"/>';
+    s+='<rect id="'+hostId+'Hit" x="'+padL+'" y="0" width="'+pw+'" height="'+H+'" fill="transparent"/></svg>';
+    const host=document.getElementById(hostId); host.innerHTML=s;
+    const svg=host.querySelector('svg'), tip=document.getElementById(tipId);
+    const xl=document.getElementById(hostId+'X'), hit=document.getElementById(hostId+'Hit');
+    hit.addEventListener('pointermove',ev=>{
+      const r=svg.getBoundingClientRect(), sc=W/r.width, px=(ev.clientX-r.left)*sc;
+      if(px<padL||px>W-padR)return;
+      const m=(px-padL)/pw*TIB, p=data.reduce((a,b)=>Math.abs(b.m-m)<Math.abs(a.m-m)?b:a);
+      xl.setAttribute('x1',sx(p.m));xl.setAttribute('x2',sx(p.m));xl.setAttribute('opacity','1');
+      tip.style.opacity=1;tip.style.left=(sx(p.m)/sc)+'px';tip.style.top='22px';
+      tip.innerHTML='<b>'+fmt(p.m)+'</b> · '+fmtV(p.v);
+    });
+    hit.addEventListener('pointerleave',()=>{xl.setAttribute('opacity','0');tip.style.opacity=0;});
+  }
+  lineChart('hrChart','hrTip',hr,{color:C.hr,min:44,max:74,fmtV:v=>Math.round(v)+' bpm'});
+  lineChart('spo2Chart','spo2Tip',spo2,{color:C.spo2,min:86,max:100,fmtV:v=>Math.round(v)+'%',dips:[240,412]});
+
+  // ---- stage bar (score screen) ----
+  (() => {
+    const bar=document.getElementById('stagebar');
+    [['D',totals.D],['R',totals.R],['L',totals.L],['A',totals.A]].forEach(([k,mins])=>{
+      const i=document.createElement('i');
+      i.style.flex=mins; i.style.background=COL[k]; bar.appendChild(i);
+    });
+  })();
+
+  // ---- score arc ----
+  (() => {
+    const arc=document.getElementById('scoreArc'), r=52, circ=2*Math.PI*r, val=82;
+    arc.style.strokeDasharray=circ;
+    arc.style.strokeDashoffset=circ*(1-val/100);
+  })();
+
+  // ---- position ring (donut) ----
+  (() => {
+    const svg=document.getElementById('posRing'); if(!svg)return;
+    const segs=[[41,C.awake],[33,'#7B74F0'],[21,C.spo2],[5,C.rem]];
+    const r=44,cx=60,cy=60,circ=2*Math.PI*r; let off=0,s='';
+    s+='<circle cx="60" cy="60" r="'+r+'" fill="none" stroke="#17233a" stroke-width="11"/>';
+    segs.forEach(([pc,col])=>{
+      const len=pc/100*circ;
+      s+='<circle cx="60" cy="60" r="'+r+'" fill="none" stroke="'+col+'" stroke-width="11" '+
+         'stroke-dasharray="'+len+' '+(circ-len)+'" stroke-dashoffset="'+(-off)+'" transform="rotate(-90 60 60)"/>';
+      off+=len;
+    });
+    svg.innerHTML=s;
+  })();
+
+  // ---- history bars ----
+  (() => {
+    const host=document.getElementById('histbars');
+    const days=[['Th',64],['Fr',71],['Sa',86],['Su',79],['Mo',74],['Tu',80],['We',82]];
+    const band=v=>v>=80?C.good:v>=65?'#7B74F0':C.warn;
+    days.forEach(([d,v],idx)=>{
+      const b=document.createElement('div'); b.className='b';
+      const isToday=idx===days.length-1;
+      b.innerHTML='<div class="sv num">'+v+'</div><div class="bar" style="height:'+(v/100*100)+'%;background:'+band(v)+
+        (isToday?';box-shadow:0 0 0 2px rgba(123,116,240,.4)':'')+'"></div><div class="d">'+d+'</div>';
+      host.appendChild(b);
+    });
+  })();
+
+  // ---- live PPG canvas ----
+  (() => {
+    const cv=document.getElementById('ppg'); if(!cv)return;
+    const ctx=cv.getContext('2d'); const W=cv.width,H=cv.height;
+    const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+    let ph=0;
+    function pulse(x){ // one PPG-ish beat shape over [0,1]
+      const t=x%1;
+      return Math.exp(-Math.pow((t-0.18)/0.055,2))*1
+           - Math.exp(-Math.pow((t-0.30)/0.05,2))*0.35
+           + Math.exp(-Math.pow((t-0.46)/0.07,2))*0.30;
+    }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      ctx.strokeStyle='#FF6E8A'; ctx.lineWidth=2.4; ctx.lineJoin='round';
+      ctx.shadowColor='rgba(255,110,138,.5)'; ctx.shadowBlur=6;
+      ctx.beginPath();
+      const beats=3.2;
+      for(let px=0;px<=W;px+=2){
+        const u=px/W*beats + ph;
+        const y=H/2 - pulse(u)*H*0.34;
+        px?ctx.lineTo(px,y):ctx.moveTo(px,y);
+      }
+      ctx.stroke(); ctx.shadowBlur=0;
+    }
+    if(reduce){ draw(); return; }
+    let raf;
+    function loop(){ ph+=0.012; draw(); raf=requestAnimationFrame(loop); }
+    // only animate while the live screen is visible
+    const liveScr=document.querySelector('[data-scr="live"]');
+    const obs=new MutationObserver(()=>{
+      if(liveScr.classList.contains('on')){ if(!raf) loop(); }
+      else if(raf){ cancelAnimationFrame(raf); raf=0; }
+    });
+    obs.observe(liveScr,{attributes:true,attributeFilter:['class']});
+    if(liveScr.classList.contains('on')) loop();
+  })();
+
+  // ---- navigation ----
+  const CAP = {
+    watch:['The home face — time, date, battery, and last night\'s score at a glance.','Raise-to-wake / tap · unplug to start tracking'],
+    live:['Real-time HR with a scrolling PPG trace, SpO₂, HRV, and a signal-quality read that doubles as a placement checker.','Swipe down from the watch face'],
+    tracking:['The dim, low-power view while recording a night — elapsed time, live heart rate, and body position.','Screen blanks to save power · double-tap to wake'],
+    score:['The morning headline: a 0–100 sleep score, stage mix, and the core summary metrics.','Swipe left/right through the report'],
+    hypnogram:['Full-night stage timeline. Hover the chart for the stage at any moment.','Deep-heavy early, REM-heavy toward morning'],
+    heart:['Overnight heart rate and blood oxygen on a shared time axis — two charts, never a dual-axis. Desaturation dips are flagged.','Hover either chart for a reading'],
+    position:['Authoritative sleep position from the torso body-sensor, segmented by time — the piece the wrist alone can\'t do.','Cross-references SpO₂ dips against posture'],
+    history:['Seven nights of scores with resting-HR and HRV trends, so patterns surface over time.','Swipe up for trends'],
+    alarm:['Smart alarm that wakes you in the lightest sleep inside your window, with a gradual sunrise wake.','ES8311 speaker · haptic needs add-on'],
+    settings:['A scrollable list of ~14 controls — brightness, timeouts, tracking mode, HRV capture, sync, sensor health — with finger-sized toggles and sliders. Tap "Sleep display" to blank it.','Scroll vertically · double-tap to wake']
+  };
+  const scrs=[...document.querySelectorAll('.scr')];
+  const btns=[...document.querySelectorAll('.chipbtn')];
+  const cap=document.getElementById('caption'), ges=document.getElementById('gesture');
+  function go(name){
+    scrs.forEach(s=>s.classList.toggle('on', s.dataset.scr===name));
+    btns.forEach(b=>b.classList.toggle('active', b.dataset.go===name));
+    const c=CAP[name]; cap.innerHTML='<b>'+document.querySelector('.chipbtn[data-go="'+name+'"]').textContent+'.</b> '+c[0];
+    ges.textContent='◍ on-device: '+c[1];
+  }
+  btns.forEach(b=>b.addEventListener('click',()=>go(b.dataset.go)));
+
+  // display-sleep demo — mirrors the on-device "Sleep display" + double-tap-to-wake
+  const dim=document.getElementById('screenDim');
+  const sbtn=document.querySelector('.sleep-btn');
+  if(dim&&sbtn){
+    sbtn.addEventListener('click',()=>dim.classList.add('on'));
+    let last=0;
+    dim.addEventListener('click',()=>{const n=performance.now();if(n-last<400){dim.classList.remove('on');last=0;}else last=n;});
+  }
+
+  go('watch');
+})();
+</script>

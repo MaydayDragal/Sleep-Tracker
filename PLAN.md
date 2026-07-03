@@ -192,7 +192,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 | **2 — Recording** | Log a full night to microSD on battery (HRV capture optional, power-permitting) | Records an 8 h night; log opens cleanly |
 | **2.5 — Body sensors** | Pair WT9011DCL over BLE → authoritative sleep position | Torso sensor reports correct position all night; lands in the SD log |
 | **3 — Sleep scoring** | Score sleep, break metrics down by position (optionally validate HRV vs ECG) | Hypnogram/score match a reference; per-night position breakdown |
-| **4 — UI polish** | The four v1 screens + 7-night history, usable on-device | A real night's report renders end-to-end from an SD log |
+| **4 — UI polish** | The four v1 screens + 7-night history, usable on-device | A real night's report renders end-to-end from an SD log *(shell of all 11 screens built & running on HW; report data still sample)* |
 | **5 — Stretch** | Smart alarm, BLE sync, respiratory rate, snore detection | No hard gate — pick items opportunistically |
 | **v3+ — Integration** | HA/MQTT + combined wrist+CPAP summary | Separate track I0–I5 — see [INTEGRATION.md](INTEGRATION.md) §7 |
 
@@ -244,9 +244,13 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 ### Phase 4 — UI polish
 **Goal:** make the on-device experience complete and pleasant.
-- [ ] Watch face, morning report with hypnogram + HR/SpO2 charts, settings, history of last 7 nights.
-- [ ] Tap-to-wake, brightness/AOD handling.
-- **Exit criteria:** all four v1 screens plus the 7-night history are navigable on-device, and a real night's report renders end-to-end from an SD log.
+- [x] **Watch UI shell** — an 11-tile swipeable LVGL app running on hardware (watch face · live vitals · tracking · score · hypnogram · heart & O2 · position · history · alarm · settings · PPG-debug), dark AMOLED theme + the CVD-validated sleep-stage palette. Interactive design reference: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
+- [x] **Live tiles wired to sensors** — watch face (RTC time/date + battery), live vitals (HR / SpO2 / real HRV / SQI + a live PPG pulse waveform from `ppg_copy_waveform()`), tracking clock, and a **PPG-debug tile** (the tuning graph + rate/HR/HRV/SQI, kept from the pre-watch-UI display). Settings is a scrollable list of ~14 finger-sized controls.
+- [x] **Display sleep + double-tap-to-wake** — blank the AMOLED (Settings → *Sleep display*) and wake with a double-tap anywhere; touch stays live at brightness 0.
+- [ ] Wire the **morning-report / position / history** tiles to real data — they render a representative sample night today (needs the Phase 3 scorer ported on-device + Phase 2.5 body sensors).
+- [ ] Brightness/AOD handling, 7-night history from real logs.
+- **Exit criteria:** all v1 screens navigable on-device (**met — as a shell**), and a real night's report renders end-to-end from an SD log (**pending on-device scoring**).
+- *Build note:* the rich UI needs larger Montserrat fonts and LVGL's C-lib allocator (the default 64 KB pool is exhausted by ~200 widgets) — both in `sdkconfig.defaults`; see [firmware/README.md](firmware/README.md).
 
 ### Phase 5 — Stretch features
 **Goal:** add the nice-to-haves once the core device is solid.
@@ -321,5 +325,7 @@ Sleep-Tracker/
 **Status (Phases 0–1 done; Phase 2 recording bench-validated on hardware):** the firmware boots on real hardware — dual-core task architecture running, all onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`, plus the FT3168 touch at `0x38` once its reset is released), the CO5300 AMOLED + LVGL come up, and **touch works** (verified with an on-screen tap counter). Board bring-up is delegated to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets on the TCA9554 (a gap in the vendor BSP). The **RTC (PCF85063), IMU accel (QMI8658), and battery (AXP2101)** now read live over I2C — verified on a diagnostic screen (clock ticking, ~1 g at rest, ~4.1 V / charging) — via hand-rolled register-level drivers (`components/rtc`, `components/pmu`, `components/actigraphy`), originally because the managed chip components required IDF ≥5.5 (the project has since moved to **ESP-IDF v6.0.2**, on which the firmware builds, flashes, and runs unchanged). The PPG driver and first-pass PPG/DSP pipeline now run live on hardware (live HR + SpO2 via the external MAX30102 at `0x57`); only the epoch-assembler and scoring bodies remain stubbed and tagged `TODO(phaseN)`.
 
 **Phase 2 (recording) update:** the epoch assembler, night-session state machine (VBUS-triggered), crash-safe CSV SD logger (`components/sd_logger`), and the power/duty-cycle TRACKING mode (`components/power`) are now **written, compiling, and adversarially reviewed**, with an offline reader (`tools/read_night.py`). Wake-on-motion was dropped (QMI8658 INT unrouted; timer-wake instead). **Flashed and bench-validated on hardware (ESP-IDF v6.0.2):** all I2C devices enumerate, the SD card mounts, a session opens the log file, continuous 30 s epochs are written to the card, and light-sleep engages in TRACKING.
+
+**Phase 4 (watch UI) update:** the on-device UI is now an **11-tile swipeable LVGL app** (`components/ui`) running on hardware — watch face, live vitals (real HR / SpO2 / HRV / SQI + a live PPG pulse waveform), tracking clock, morning-report screens (score / hypnogram / heart & O2), position, history, alarm, a scrollable settings list, and a **PPG-debug tile** (the tuning graph, preserved) — plus display-sleep + double-tap-to-wake. The watch / live / tracking / debug tiles show live sensor data; the report / position / history tiles render a representative sample night pending on-device scoring + Phase 2.5 body sensors. Interactive design reference: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
 
 **Next steps:** (1) flash + microSD bench run — **done**: epochs write to the card on hardware and light-sleep engages; (2) attach a **Li-Po on the header** (gauge reads 0%), then run an overnight session + spikes S3/S4 (SD throughput + overnight mAh on an external coulomb counter) to close the "8 h on battery" exit gate; (3) Phase 2.5 body sensors / Phase 3 scoring (the offline scorer in `tools/` is ready to port on-device).
