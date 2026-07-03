@@ -58,42 +58,61 @@ static void sensor_task(void *arg)
 
     ESP_LOGI(TAG, "sensor task running on core %d", xPortGetCoreID());
 
+    int slow = 0, echo = 0, raw = 0;
     for (;;) {
-        // Phase-1 bring-up: read the onboard chips and push a live readout.
-        // TODO(phase1-2): drain MAX3010x FIFO -> ppg_process() -> sleep_core;
-        // accumulate 30 s epochs and persist to SD.
-        char timebuf[16] = "--:--:--";
-        ui_status_t st = { .time_str = timebuf, .accel_g = 0.0f, .batt_pct = -1 };
-
-        pcf85063_datetime_t t;
-        if (pcf85063_get(&t) == ESP_OK) {
-            snprintf(timebuf, sizeof timebuf, "%02u:%02u:%02u",
-                     (unsigned)t.hour, (unsigned)t.min, (unsigned)t.sec);
+        // Drain the MAX30102 FIFO every loop (~120 ms) and run the PPG pipeline.
+        // TODO(phase2): route beats -> sleep_core and accumulate 30 s epochs -> SD.
+        max30102_sample_t fifo[32];
+        size_t n = 0;
+        if (max30102_read_fifo(fifo, 32, &n) == ESP_OK && n > 0) {
+            ppg_beat_t beat;
+            ppg_process(fifo, n, &beat);
+            if ((raw++ % 8) == 0) {   // raw echo ~every 1 s — proves the PPG responds
+                ESP_LOGI(TAG, "ppg raw: ir=%lu red=%lu (n=%u)",
+                         (unsigned long)fifo[0].ir, (unsigned long)fifo[0].red, (unsigned)n);
+            }
         }
 
-        float x, y, z;
-        if (actigraphy_read_accel_g(&x, &y, &z) == ESP_OK) {
-            st.accel_g = sqrtf(x * x + y * y + z * z);
+        // Update the display + slow chips ~every 480 ms.
+        if ((slow++ % 4) == 0) {
+            char timebuf[16] = "--:--:--";
+            ui_status_t st = { .time_str = timebuf, .accel_g = 0.0f, .batt_pct = -1 };
+
+            pcf85063_datetime_t t;
+            if (pcf85063_get(&t) == ESP_OK) {
+                snprintf(timebuf, sizeof timebuf, "%02u:%02u:%02u",
+                         (unsigned)t.hour, (unsigned)t.min, (unsigned)t.sec);
+            }
+
+            float x, y, z;
+            if (actigraphy_read_accel_g(&x, &y, &z) == ESP_OK) {
+                st.accel_g = sqrtf(x * x + y * y + z * z);
+            }
+
+            ppg_vitals_t v = ppg_current_vitals();
+            st.finger = v.sqi > 0.5f;
+            st.hr_bpm = (int)(v.hr_bpm + 0.5f);
+            st.spo2   = (int)(v.spo2_pct + 0.5f);
+
+            pmu_status_t p;
+            if (pmu_read(&p) == ESP_OK) {
+                st.batt_pct = p.batt_pct;
+                st.vbat_mv  = p.vbat_mv;
+                st.charging = p.charging;
+                st.vbus     = p.vbus_present;
+            }
+
+            if ((echo++ % 10) == 0) {   // ~every 5 s
+                ESP_LOGI(TAG, "readout: t=%s accel=%dmg hr=%d spo2=%d finger=%d batt=%d%% %s",
+                         timebuf, (int)(st.accel_g * 1000.0f), st.hr_bpm, st.spo2,
+                         st.finger, st.batt_pct,
+                         st.charging ? "CHG" : (st.vbus ? "USB" : "BAT"));
+            }
+
+            ui_set_status(&st);
         }
 
-        pmu_status_t p;
-        if (pmu_read(&p) == ESP_OK) {
-            st.batt_pct = p.batt_pct;
-            st.vbat_mv  = p.vbat_mv;
-            st.charging = p.charging;
-            st.vbus     = p.vbus_present;
-        }
-
-        // Throttled serial echo (~every 5 s) for off-screen verification.
-        static int tick = 0;
-        if ((tick++ % 10) == 0) {
-            ESP_LOGI(TAG, "readout: t=%s accel=%dmg batt=%d%% vbat=%dmV %s",
-                     timebuf, (int)(st.accel_g * 1000.0f), st.batt_pct,
-                     st.vbat_mv, st.charging ? "CHG" : (st.vbus ? "USB" : "BAT"));
-        }
-
-        ui_set_status(&st);
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(120));
     }
 }
 
