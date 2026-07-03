@@ -20,11 +20,13 @@
 // reduction here is despike (removes what a filter can't) + an SQI/artifact gate
 // (don't emit HR you can't trust), not a fancier band-pass.
 //
-// All the filter coefficients are derived from PPG_FS_HZ at ppg_reset(), so the
-// sample rate is the single knob — change it here + the driver's SPO2_CONFIG +
-// the FIFO poll cadence in main, and the filters retune themselves.
+// All the filter coefficients are derived from the current sample rate (S.fs),
+// which can change at RUNTIME via ppg_set_rate() — the HR/HRV duty-cycle runs a
+// low rate for HR and bumps to 400 Hz for HRV windows. The filters/detector
+// retune and re-settle on each change; the displayed vitals persist across it.
 
-#define PPG_FS_HZ        400.0f     // MUST match the MAX30102 SPO2_CONFIG rate
+#define PPG_FS_DEFAULT   400.0f     // startup rate (until ppg_set_rate() is called)
+#define HRV_RATE_MIN     200.0f     // only accumulate HRV IBIs at/above this rate
 #define FINGER_IR_MIN    30000.0f   // IR DC below this => no finger on the sensor
 #define REFRACTORY_S     0.35f      // min beat spacing (=> max ~171 bpm)
 #define IBI_MAX_S        2.0f       // max beat spacing (=> min 30 bpm)
@@ -38,6 +40,7 @@
 #define ART_EXCURSION    4.0f       // |band-passed| beyond this x tracked amplitude => motion
 #define ART_SLEW         2.5f       // per-sample jump beyond this x amplitude => motion
 #define ART_HOLD_S       0.4f       // suppress beats + decay quality this long after motion
+#define FINGER_SETTLE_S  0.7f       // suppress beats this long after the finger is placed
 #define PI_FULL          0.004f     // perfusion index (ACpp/DC) giving full quality (fingertip ~0.9%)
 #define PI_MIN           0.0004f    // perfusion at/below which the perfusion term -> 0
 #define SQI_VALID        0.3f       // vitals.valid requires the smoothed SQI above this
@@ -58,6 +61,7 @@ static struct {
     float    spo2;
     float    ac_ir_max, ac_ir_min, ac_red_max, ac_red_min;  // per-beat extremes
     bool     finger;
+    bool     finger_prev;           // for detecting the finger-on edge
     bool     seeded;
     float    lp2;                   // second low-pass pole (=> 12 dB/oct roll-off)
     float    med_ir1, med_ir2;      // raw median-3 despike history (IR)
@@ -67,7 +71,8 @@ static struct {
     float    ibi_win[HRV_WIN];      // rolling recent NORMAL IBIs (ms) for live HRV
     int      ibi_count, ibi_head;
     float    rmssd_ms;              // live RMSSD over the window (0 until HRV_MIN_BEATS)
-    // fs-derived coefficients (set in ppg_reset)
+    // current sample rate + fs-derived coefficients (set in set_coeffs)
+    float    fs;
     float    a_lp, a_dc, a_thr, a_pkdecay;
     int      wave_decim, wave_dcount;
     int32_t  wave[PPG_WAVE_N];      // band-passed waveform ring (on-device graph)
@@ -110,17 +115,41 @@ static void hrv_push(float ibi_ms)
     }
 }
 
+// Derive all fs-dependent coefficients from a sample rate (alpha = 1 - e^{-2*pi*fc/fs}).
+static void set_coeffs(float fs)
+{
+    S.fs = fs;
+    S.a_lp  = 1.0f - expf(-2.0f * (float)M_PI * LP_FC_HZ / fs);
+    S.a_dc  = 1.0f - expf(-2.0f * (float)M_PI * HP_FC_HZ / fs);
+    S.a_thr = 1.0f / fs;                      // ~1 s envelope time constant
+    S.a_pkdecay = expf(-1.0f / (fs * 10.0f)); // ~10 s peak-amp decay
+    S.wave_decim = (int)(fs / WAVE_TARGET_HZ + 0.5f);
+    if (S.wave_decim < 1) S.wave_decim = 1;
+}
+
 void ppg_reset(void)
 {
     memset(&S, 0, sizeof S);
     S.last_beat_idx = -1;
-    // 1-pole coefficients from the target corners (alpha = 1 - e^{-2*pi*fc/fs}).
-    S.a_lp  = 1.0f - expf(-2.0f * (float)M_PI * LP_FC_HZ / PPG_FS_HZ);
-    S.a_dc  = 1.0f - expf(-2.0f * (float)M_PI * HP_FC_HZ / PPG_FS_HZ);
-    S.a_thr = 1.0f / PPG_FS_HZ;                  // ~1 s envelope time constant
-    S.a_pkdecay = expf(-1.0f / (PPG_FS_HZ * 10.0f));  // ~10 s peak-amp decay
-    S.wave_decim = (int)(PPG_FS_HZ / WAVE_TARGET_HZ + 0.5f);
-    if (S.wave_decim < 1) S.wave_decim = 1;
+    set_coeffs(PPG_FS_DEFAULT);
+}
+
+void ppg_set_rate(float fs)
+{
+    if (fs <= 0.0f || fs == S.fs) {
+        return;
+    }
+    set_coeffs(fs);
+    // The FIFO is flushed on a rate change, so the sample-index timeline is
+    // discontinuous: drop the beat-timing reference (one skipped IBI) and start a
+    // fresh HRV window. Keep the band-pass / threshold / peak-amp / HR WARM — a
+    // correctly-scaled peak_amp is what lets the detector re-lock within a beat
+    // AND self-reject transients; zeroing it makes the artifact gate misfire on
+    // normal pulses. The finger-placement transient (the one case where peak_amp
+    // is genuinely stale) is handled by the settle hold in ppg_process().
+    S.last_beat_idx = -1;
+    S.art_hold = 0;
+    S.ibi_count = S.ibi_head = 0;     // fresh HRV window per high-rate burst
 }
 
 bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_beat)
@@ -154,6 +183,15 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         S.dc_red += (fabsf(d_red) > 5000.0f) ? d_red * 0.5f : d_red * S.a_dc;
         S.finger = S.dc_ir > FINGER_IR_MIN;
 
+        // On the finger-on edge, hold off beat detection while the baseline and
+        // filters settle. peak_amp has decayed toward 0 during the finger-off
+        // gap, so without this the placement transient would be accepted as a
+        // giant "beat" and poison peak_amp (blocking real beats for ~10 s).
+        if (S.finger && !S.finger_prev) {
+            S.art_hold = (int)(FINGER_SETTLE_S * S.fs);
+        }
+        S.finger_prev = S.finger;
+
         const float ac_ir  = ir  - S.dc_ir;
         const float ac_red = red - S.dc_red;
 
@@ -179,7 +217,7 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         if (S.finger && S.peak_amp > 50.0f &&
             (fabsf(lp)  > ART_EXCURSION * S.peak_amp ||
              fabsf(dlp) > ART_SLEW      * S.peak_amp)) {
-            S.art_hold = (int)(ART_HOLD_S * PPG_FS_HZ);
+            S.art_hold = (int)(ART_HOLD_S * S.fs);
         } else if (S.art_hold > 0) {
             S.art_hold--;
         }
@@ -213,7 +251,7 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
                 S.last_beat_idx = peak_idx;
                 S.peak_amp = S.lp_prev;
             } else {
-                const float ibi = (peak_idx - S.last_beat_idx) / PPG_FS_HZ;
+                const float ibi = (peak_idx - S.last_beat_idx) / S.fs;
                 if (ibi >= REFRACTORY_S && ibi <= IBI_MAX_S) {
                     const float hr = 60.0f / ibi;
                     // Plausibility gate: a single IBI that implies an HR far from
@@ -224,7 +262,11 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
                     if (plausible) {
                         S.hr_bpm = (S.hr_bpm == 0.0f) ? hr
                                  : S.hr_bpm + (hr - S.hr_bpm) * 0.2f;
-                        hrv_push(ibi * 1000.0f);   // feed the live HRV window
+                        // HRV only accumulates in high-rate windows; low-rate HR
+                        // beats are too coarsely timed for a meaningful RMSSD.
+                        if (S.fs >= HRV_RATE_MIN) {
+                            hrv_push(ibi * 1000.0f);
+                        }
                     }
 
                     // Per-beat signal quality = perfusion x amplitude-consistency

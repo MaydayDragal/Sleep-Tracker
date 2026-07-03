@@ -28,5 +28,9 @@ esp_err_t max30102_init(i2c_master_bus_handle_t bus, const max30102_config_t *cf
 // Drain up to `max` samples from the FIFO; sets *out_count to samples read.
 esp_err_t max30102_read_fifo(max30102_sample_t *out, size_t max, size_t *out_count);
 
+// Change the sample rate at runtime (rewrites SPO2_CONFIG + flushes the FIFO).
+// Used by the HR/HRV duty-cycle: a low rate for HR, bumped to 400 Hz for HRV.
+esp_err_t max30102_set_sample_rate(uint16_t hz);
+
 // Low-power shutdown between duty-cycle windows (PLAN.md §2.3).
 esp_err_t max30102_shutdown(bool enable);

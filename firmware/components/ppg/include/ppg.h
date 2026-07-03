@@ -38,6 +38,11 @@ typedef struct {
 // Reset filter/detector state (call when (re)starting acquisition).
 void ppg_reset(void);
 
+// Change the processing sample rate at runtime to match the sensor (used by the
+// HR/HRV duty-cycle). Retunes the filters and resets the detector transient;
+// keeps the last vitals for display. HRV (RMSSD) only accumulates at >= 200 Hz.
+void ppg_set_rate(float fs);
+
 // Feed `n` raw samples. Returns true and fills *out_beat when a beat is
 // detected this call; updates the running vitals either way.
 bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_beat);

@@ -130,6 +130,20 @@ esp_err_t max30102_read_fifo(max30102_sample_t *out, size_t max, size_t *out_cou
     return ESP_OK;
 }
 
+esp_err_t max30102_set_sample_rate(uint16_t hz)
+{
+    if (s_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = wr(REG_SPO2_CONFIG, spo2_config(hz));
+    // Flush the FIFO so the consumer doesn't mix samples from the old rate.
+    wr(REG_FIFO_WR_PTR, 0x00);
+    wr(REG_OVF_COUNTER, 0x00);
+    wr(REG_FIFO_RD_PTR, 0x00);
+    ESP_LOGI(TAG, "sample rate -> %u Hz", (unsigned)hz);
+    return err;
+}
+
 esp_err_t max30102_shutdown(bool enable)
 {
     if (s_dev == NULL) {
