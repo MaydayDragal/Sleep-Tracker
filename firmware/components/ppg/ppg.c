@@ -265,10 +265,15 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         const float snr_lin = S.p_sig / (S.p_noise + 1.0f);
         S.snr_db = 10.0f * log10f(snr_lin + 1e-9f);
 
-        // Retain the filtered sample for the on-device debug graph.
+        // Retain the filtered sample for the on-device debug graph. NEGATED so the
+        // trace reads the conventional way up: this is a REFLECTIVE PPG, where a
+        // systolic blood-volume rise ABSORBS more light and DROPS the raw count, so
+        // `lp` dips at each beat. Flipping the sign for display makes the systolic
+        // upstroke point UP (the detector/HR/SpO2/SQI math is unchanged — it runs on
+        // the un-negated `lp`).
         if (++S.wave_dcount >= S.wave_decim) {
             S.wave_dcount = 0;
-            S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)lp;
+            S.wave[S.wave_head % PPG_WAVE_N] = (int32_t)(-lp);
             S.wave_head++;
         }
 
