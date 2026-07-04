@@ -1,5 +1,4 @@
 #include "nettime.h"
-#include "pcf85063.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -11,8 +10,10 @@
 #include <string.h>
 #include <time.h>
 
-// Transient WiFi + SNTP -> PCF85063 RTC. See nettime.h. WiFi is torn down before
-// this returns; it is never left running.
+// Transient WiFi + SNTP time fetch. See nettime.h. WiFi is torn down before this
+// returns; it is never left running. Deliberately does NO I2C (returns the time
+// as a value; the caller writes the RTC later) so WiFi never overlaps the shared
+// I2C bus — concurrent WiFi + I2C wedged the bus and froze the display/touch.
 
 // Network credentials live in a gitignored header next to this file (copy
 // wifi_config.example.h -> wifi_config.h). Absent => the defaults below make
@@ -129,53 +130,38 @@ static void wifi_down(esp_netif_t *sta, esp_event_handler_instance_t hw,
     ESP_LOGI(TAG, "WiFi off");
 }
 
-esp_err_t nettime_sync(void)
+time_t nettime_fetch(void)
 {
     if (strlen(SLEEPTRK_WIFI_SSID) == 0) {
         ESP_LOGW(TAG, "no WiFi SSID set (copy components/nettime/wifi_config.example.h "
-                      "-> wifi_config.h) — skipping NTP, keeping RTC time");
-        return ESP_ERR_INVALID_STATE;
+                      "-> wifi_config.h) — skipping NTP");
+        return 0;
     }
 
     esp_netif_t *sta = NULL;
     esp_event_handler_instance_t hw = NULL, hi = NULL;
-    esp_err_t rc = ESP_FAIL;
+    time_t local = 0;   // local wall clock as a time_t (UTC + offset), 0 => failed
 
     if (wifi_up(&sta, &hw, &hi)) {
         ESP_LOGI(TAG, "connected — SNTP from %s", SLEEPTRK_NTP_SERVER);
         esp_sntp_config_t sc = ESP_NETIF_SNTP_DEFAULT_CONFIG(SLEEPTRK_NTP_SERVER);
         if (esp_netif_sntp_init(&sc) == ESP_OK) {
             if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(SNTP_MS)) == ESP_OK) {
-                time_t now = time(NULL) + (time_t)(SLEEPTRK_UTC_OFFSET_MIN) * 60;
+                local = time(NULL) + (time_t)(SLEEPTRK_UTC_OFFSET_MIN) * 60;
                 struct tm tmv;
-                gmtime_r(&now, &tmv);
-                pcf85063_datetime_t dt = {
-                    .year  = (uint16_t)(tmv.tm_year + 1900),
-                    .month = (uint8_t)(tmv.tm_mon + 1),
-                    .day   = (uint8_t)tmv.tm_mday,
-                    .dotw  = (uint8_t)tmv.tm_wday,
-                    .hour  = (uint8_t)tmv.tm_hour,
-                    .min   = (uint8_t)tmv.tm_min,
-                    .sec   = (uint8_t)tmv.tm_sec,
-                };
-                if (pcf85063_set(&dt) == ESP_OK) {
-                    ESP_LOGI(TAG, "RTC set from NTP: %04u-%02u-%02u %02u:%02u:%02u (UTC%+dmin)",
-                             (unsigned)dt.year, (unsigned)dt.month, (unsigned)dt.day,
-                             (unsigned)dt.hour, (unsigned)dt.min, (unsigned)dt.sec,
-                             (int)(SLEEPTRK_UTC_OFFSET_MIN));
-                    rc = ESP_OK;
-                } else {
-                    ESP_LOGW(TAG, "pcf85063_set failed");
-                }
+                gmtime_r(&local, &tmv);
+                ESP_LOGI(TAG, "NTP time: %04d-%02d-%02d %02d:%02d:%02d (UTC%+dmin)",
+                         tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                         tmv.tm_hour, tmv.tm_min, tmv.tm_sec, (int)(SLEEPTRK_UTC_OFFSET_MIN));
             } else {
                 ESP_LOGW(TAG, "SNTP sync timed out");
             }
             esp_netif_sntp_deinit();
         }
     } else {
-        ESP_LOGW(TAG, "WiFi connect failed/timed out — keeping RTC time");
+        ESP_LOGW(TAG, "WiFi connect failed/timed out");
     }
 
     wifi_down(sta, hw, hi);
-    return rc;
+    return local;
 }

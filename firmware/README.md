@@ -79,6 +79,8 @@ firmware/
 
 The RTC is set at boot from an NTP server if WiFi is configured, then WiFi is turned back off (it is not kept running). To enable it, copy [`components/nettime/wifi_config.example.h`](components/nettime/wifi_config.example.h) → `components/nettime/wifi_config.h` (gitignored) and fill in your **2.4 GHz** SSID/password and `SLEEPTRK_UTC_OFFSET_MIN` (local = UTC + minutes). Without that file NTP is skipped and the RTC keeps its battery-backed time (or the built-in seed date on a cold start). The clock is a naive wall clock (`tz_offset_min=0` in the log header), so the UTC offset just makes the watch face show local time.
 
+> **Critical ordering:** `nettime_fetch()` runs at the very start of `app_main()`, **before `board_init()` brings up the I2C bus** — WiFi's interrupt latency will glitch an in-flight I2C transaction and *wedge the shared bus* (which hangs the display flush and kills touch) if the two ever overlap. WiFi must be fully done and off before any I2C device is touched; `nettime_fetch()` returns the time as a value and the sensor task writes it to the RTC afterward. (This bit us once — a concurrent WiFi/I2C bring-up froze the UI with a `taskLVGL` watchdog on `wait_for_flushing`.)
+
 ## Board abstraction (S3 ↔ C6)
 
 All board-specific code lives in `components/board`, which delegates to the

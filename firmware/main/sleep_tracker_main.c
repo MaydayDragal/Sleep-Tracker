@@ -32,6 +32,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
 
 static const char *TAG = "main";
 
@@ -43,6 +44,11 @@ static const char *TAG = "main";
 // Set by the UI task once the display is up, so the sensor task never drives a
 // mode transition (display off / LVGL stop) before LVGL exists.
 static volatile bool s_display_ready = false;
+
+// Local wall-clock time fetched over NTP in app_main() BEFORE any I2C is up (so
+// WiFi can't wedge the shared I2C bus). 0 if unavailable. The sensor task writes
+// it to the RTC once the RTC (I2C) is initialized. gmtime_r() yields local Y/M/D.
+static time_t s_ntp_time;
 
 // ACTIVE mode runs continuously at the user-selected PPG rate (Settings ->
 // ui_hr_rate_hz(), one of 50/100/200/400/800 Hz, default 50). No HR/HRV rate
@@ -247,11 +253,23 @@ static void sensor_task(void *arg)
     pmu_init(bus);
     ppg_reset();
 
-    // Fetch the time over NTP (brief WiFi, then off) and write it to the RTC. No-op
-    // if no wifi_config.h / SSID is set, or if WiFi/NTP is unreachable — in which
-    // case the seed fallback below applies. Runs before the seed check so a good
-    // NTP time always wins over the fixed fallback date.
-    nettime_sync();
+    // Write the NTP time fetched in app_main() (before any I2C, so WiFi couldn't
+    // wedge the bus) to the RTC. WiFi is already off by now. Runs before the seed
+    // check so a good NTP time wins over the fixed fallback date.
+    if (s_ntp_time > 0) {
+        struct tm tmv;
+        gmtime_r(&s_ntp_time, &tmv);
+        const pcf85063_datetime_t dt = {
+            .year  = (uint16_t)(tmv.tm_year + 1900), .month = (uint8_t)(tmv.tm_mon + 1),
+            .day   = (uint8_t)tmv.tm_mday, .dotw = (uint8_t)tmv.tm_wday,
+            .hour  = (uint8_t)tmv.tm_hour, .min  = (uint8_t)tmv.tm_min, .sec = (uint8_t)tmv.tm_sec,
+        };
+        if (pcf85063_set(&dt) == ESP_OK) {
+            ESP_LOGI(TAG, "RTC set from NTP: %04u-%02u-%02u %02u:%02u:%02u",
+                     (unsigned)dt.year, (unsigned)dt.month, (unsigned)dt.day,
+                     (unsigned)dt.hour, (unsigned)dt.min, (unsigned)dt.sec);
+        }
+    }
 
     // Seed the RTC if it (still) powered up unset, so timestamps are sane.
     pcf85063_datetime_t seed_check;
@@ -331,6 +349,11 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     ESP_LOGI(TAG, "Sleep Tracker booting (Waveshare ESP32-S3-Touch-AMOLED-1.8)");
+
+    // NTP time first, BEFORE any I2C is up: WiFi's interrupt latency wedges the
+    // shared I2C bus if they overlap (froze the display/touch). nettime brings
+    // WiFi up, fetches the time, and turns WiFi off — all before board_init().
+    s_ntp_time = nettime_fetch();
 
     ESP_ERROR_CHECK(board_init());       // shared I2C bus + enumeration scan
     board_sdcard_mount();                // night logs (no-op-safe if no card)
