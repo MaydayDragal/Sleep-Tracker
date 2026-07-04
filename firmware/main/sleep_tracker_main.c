@@ -3,10 +3,13 @@
 // Architecture (PLAN.md §3): the dual-core S3 keeps sensor acquisition isolated
 // from the UI. Core 1 samples the MAX3010x + QMI8658 and assembles epochs; core
 // 0 drives LVGL. In Phase 2 the sensor task runs in one of two modes:
-//   ACTIVE   — on charger: live vitals on the display (the Phase-1 behavior).
-//   TRACKING — off charger: display off, sensors duty-cycled, CPU light-sleeping
-//              between wakes, each 30 s epoch logged to microSD.
-// The trigger is VBUS: unplug to start a night, plug in to end it.
+//   ACTIVE   — live vitals on the display (the Phase-1 behavior).
+//   TRACKING — recording a night: panel blanked, sensors duty-cycled, each 30 s
+//              epoch logged to microSD. LVGL/touch stay live so the on-screen
+//              Stop button remains reachable.
+// The trigger is the on-screen Start/Stop button (ui.c): it calls
+// sleep_core_request_start/stop(); the sensor task applies the request in
+// sleep_core_service() and switches mode off sleep_core_state().
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,11 +34,6 @@
 
 static const char *TAG = "main";
 
-// Consecutive VBUS readings that must agree before starting/stopping a night, so
-// a brief glitch can't spuriously begin or end recording. In ACTIVE the loop is
-// ~120 ms (fast start); in TRACKING it is one duty wake (~30 s), a deliberate stop.
-#define VBUS_DEBOUNCE 2
-
 // Debug: stream every raw PPG sample as "R,<ir>,<red>" over the console while in
 // ACTIVE mode, for offline analysis (tools/capture_ppg.py -> tools/analyze_ppg.py).
 // Set to 0 to silence. Not emitted during TRACKING (the console is idle then).
@@ -45,18 +43,12 @@ static const char *TAG = "main";
 // mode transition (display off / LVGL stop) before LVGL exists.
 static volatile bool s_display_ready = false;
 
-// ACTIVE-mode HR/HRV duty-cycle. HR only needs a low sample rate (validated down
-// to ~12.5 Hz offline; 50 Hz is the MAX30102 native floor and ~half the LED duty
-// of 100 Hz), so we run HR at a low rate to save power and periodically bump to
-// 400 Hz for an HRV snapshot. Testable over USB now; the same infra is meant to
-// drive the battery TRACKING path later.
-#define HR_RATE_HZ     50       // low-power HR-only rate
-#define HRV_RATE_HZ    400      // high-rate window for precise HRV timing
-#define HR_WINDOW_MS   20000    // stay in low-rate HR mode this long...
-#define HRV_WINDOW_MS  15000    // ...then run 400 Hz this long, capturing HRV
+// ACTIVE mode runs continuously at the user-selected PPG rate (Settings ->
+// ui_hr_rate_hz(), one of 50/100/200/400/800 Hz, default 50). No HR/HRV rate
+// switching — the sensor stays at whatever rate is chosen (live HRV only
+// accumulates at >= 200 Hz; ppg.c gates that). TRACKING samples at HRV_RATE_HZ.
+#define HRV_RATE_HZ    400      // full-rate PPG used while recording (TRACKING)
 static uint16_t s_ppg_rate;     // current sensor rate (0 => not yet configured)
-static bool     s_hrv_window;   // true while in the 400 Hz HRV window
-static int64_t  s_mode_t0;      // esp_timer at the current window's start
 
 static void active_set_ppg_rate(uint16_t hz)
 {
@@ -186,6 +178,8 @@ static void tracking_wake(int wake_count)
             max30102_sample_t fifo[32];
             size_t n = 0;
             if (max30102_read_fifo(fifo, 32, &n) == ESP_OK && n > 0) {
+                // Buffer the raw samples in PSRAM; flushed to SD per window below.
+                sd_logger_raw_write(fifo, n, sleep_core_now_unix(), HRV_RATE_HZ);
                 ppg_beat_t beat;
                 if (ppg_process(fifo, n, &beat)) {
                     sleep_core_add_beat(&beat);
@@ -206,6 +200,7 @@ static void tracking_wake(int wake_count)
         max30102_shutdown(true);
         sleep_core_set_ppg_powered(false);
         sleep_core_event(SLEEP_EV_PPG_OFF, 0);
+        sd_logger_raw_flush();   // one large SD write per PPG window (PPG now off)
     } else {
         // Accel-only wake: a short burst so the activity count has samples.
         for (int i = 0; i < POWER_ACTI_BURST_N; i++) {
@@ -270,67 +265,38 @@ static void sensor_task(void *arg)
     }
 
     bool tracking = false;
-    bool last_vbus = true;   // assume on-charger at boot until a read says otherwise
-    int  vbus_agree = 0;     // consecutive readings disagreeing with `tracking`
     int  wake_count = 0;
     for (;;) {
-        bool vbus = last_vbus;   // on a failed read, retain last — never fake "plugged in"
-        pmu_status_t p;
-        if (pmu_read(&p) == ESP_OK) {
-            vbus = p.vbus_present;
-        }
-        last_vbus = vbus;
+        // Apply any pending start/stop request from the UI button (it runs on core
+        // 0 and only sets a flag); the session actually opens/closes here on core 1.
+        sleep_core_service();
+        const bool want_tracking = (sleep_core_state() == SLEEP_TRACKING);
 
-        const bool want_tracking = !vbus;   // off charger => record the night
-        if (want_tracking != tracking && ++vbus_agree >= VBUS_DEBOUNCE) {
-            vbus_agree = 0;
-            if (want_tracking) {
-                power_enter_tracking();
-                max30102_set_sample_rate(HRV_RATE_HZ);   // tracking runs full-rate PPG
-                ppg_set_rate((float)HRV_RATE_HZ);
-                sleep_core_request_start();
-                sleep_core_service();           // apply the start (opens the SD log)
-                tracking = true;
-                wake_count = 0;
-                ESP_LOGI(TAG, "VBUS lost -> start tracking");
-            } else {
-                sleep_core_request_stop();
-                sleep_core_service();           // apply the stop (closes the SD log)
-                max30102_shutdown(false);       // re-wake PPG for the live ACTIVE UI
-                power_exit_tracking();
-                ui_display_wake();              // clear any manual display-sleep so
-                                               // ACTIVE never resumes behind the overlay
-                tracking = false;
-                s_ppg_rate = 0;                 // force the ACTIVE duty-cycle to reconfigure
-                ESP_LOGI(TAG, "VBUS present -> stop tracking");
-            }
-        } else if (want_tracking == tracking) {
-            vbus_agree = 0;
+        if (want_tracking && !tracking) {
+            power_enter_tracking();
+            max30102_set_sample_rate(HRV_RATE_HZ);   // tracking runs full-rate PPG
+            ppg_set_rate((float)HRV_RATE_HZ);
+            tracking = true;
+            wake_count = 0;
+            ESP_LOGI(TAG, "Start pressed -> tracking");
+        } else if (!want_tracking && tracking) {
+            max30102_shutdown(false);       // re-wake PPG for the live ACTIVE UI
+            power_exit_tracking();
+            tracking = false;
+            s_ppg_rate = 0;                 // force the ACTIVE duty-cycle to reconfigure
+            ESP_LOGI(TAG, "Stop pressed -> active");
         }
 
         if (tracking) {
             tracking_wake(wake_count++);
         } else {
-            // HR/HRV duty-cycle: low-rate HR most of the time, a periodic 400 Hz
-            // window for HRV. Sensor + DSP rate are switched together.
-            const int64_t now = esp_timer_get_time();
-            if (s_ppg_rate == 0) {
-                s_mode_t0 = now;
-                active_set_ppg_rate(HR_RATE_HZ);
-            }
-            const int64_t elapsed_ms = (now - s_mode_t0) / 1000;
-            if (!s_hrv_window && elapsed_ms >= HR_WINDOW_MS) {
-                s_hrv_window = true;  s_mode_t0 = now;
-                active_set_ppg_rate(HRV_RATE_HZ);
-                ESP_LOGI(TAG, "duty-cycle: HRV window @ %d Hz", HRV_RATE_HZ);
-            } else if (s_hrv_window && elapsed_ms >= HRV_WINDOW_MS) {
-                s_hrv_window = false; s_mode_t0 = now;
-                active_set_ppg_rate(HR_RATE_HZ);
-                ESP_LOGI(TAG, "duty-cycle: HR low-power @ %d Hz", HR_RATE_HZ);
-            }
+            // Run continuously at the user-selected rate (Settings -> ui_hr_rate_hz()).
+            // Re-applied every loop; active_set_ppg_rate early-returns when unchanged,
+            // so a Settings change takes effect within one poll.
+            active_set_ppg_rate(ui_hr_rate_hz());
             active_poll();
             // Poll fast enough for the FIFO at the current rate (32 deep): ~20 ms
-            // at 400 Hz, a relaxed ~200 ms at 50 Hz (also less CPU wake).
+            // at >=200 Hz, a relaxed ~200 ms at low rates (also less CPU wake).
             vTaskDelay(pdMS_TO_TICKS(s_ppg_rate >= 200 ? 20 : 200));
         }
     }
@@ -344,7 +310,8 @@ static void ui_task(void *arg)
     ESP_LOGI(TAG, "ui task running on core %d", xPortGetCoreID());
 
     for (;;) {
-        power_ui_gate_wait();             // blocks while TRACKING (display off)
+        power_ui_gate_wait();             // blocks the redundant UI task while TRACKING
+                                          // (LVGL/touch keep running on the port task)
         ui_tick();                        // no-op: LVGL runs on the esp_lvgl_port task
         vTaskDelay(pdMS_TO_TICKS(16));    // ~60 fps budget
     }

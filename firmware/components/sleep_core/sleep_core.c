@@ -119,6 +119,7 @@ void sleep_core_set_hooks(const sleep_core_hooks_t *hooks)
 void sleep_core_request_start(void) { s_req_start = true; }
 void sleep_core_request_stop(void)  { s_req_stop  = true; }
 sleep_state_t sleep_core_state(void) { return s_state; }
+uint32_t sleep_core_now_unix(void)  { return now_unix(); }
 
 void sleep_core_event(uint8_t kind, int32_t detail)
 {

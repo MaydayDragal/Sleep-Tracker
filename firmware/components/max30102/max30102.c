@@ -48,6 +48,7 @@ static uint8_t spo2_config(uint16_t sr_hz)
         case 100: sr = 1; pw = 3; break;   // 411 us, 18-bit
         case 200: sr = 2; pw = 2; break;   // 215 us, 17-bit
         case 400: sr = 3; pw = 1; break;   // 118 us, 16-bit
+        case 800: sr = 4; pw = 0; break;   //  69 us, 15-bit (shortest pulse fits 2 LEDs)
         default:  sr = 1; pw = 3; break;   // fall back to 100 Hz
     }
     return (uint8_t)((1u << 5) | (sr << 2) | pw);

@@ -2,9 +2,9 @@
 
 ESP-IDF firmware for the wrist sleep tracker on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** (+ external MAX3010x PPG sensor: MAX30102 now → MAX30101 planned).
 
-**Status (Phases 0–1 done; Phase 2 recording bench-validated on hardware):** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, and LVGL renders. Board bring-up (display/touch/SD/PMU/expander) is delegated to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); the project's [`components/board/`](components/board/) is a thin seam over it. The Phase 1 sensor + PPG bodies are now live on hardware — the PCF85063 RTC ticks, the QMI8658 reads ~1 g at rest, the AXP2101 reports battery, and the external MAX30102 yields live heart rate (~81 bpm) and SpO2 (98–99%). The remaining UI/recording/sync *feature* bodies are still stubbed and tagged `TODO(phaseN)` per the milestones in [`../PLAN.md`](../PLAN.md). Touch works too — the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander (see the note under **Layout**). **Phase 2 recording is now bench-validated on hardware:** the microSD card mounts, a session opens the log file, continuous 30 s epochs are written to the card, and light-sleep engages in TRACKING (verified on **ESP-IDF v6.0.2**).
+**Status — Phases 0-1 done + hardware-validated; Phase 2 recording bench-validated over USB; Phase 4 UI shell on hardware; on-device scoring still offline:** the board boots on real hardware — all onboard I²C devices enumerate, the CO5300 AMOLED comes up, LVGL renders, and touch works (the vendor BSP omits the FT3168 reset, so `board/` releases it via the TCA9554 expander — see the note under **Layout**). Board bring-up delegates to Waveshare's **managed BSP component** (`waveshare/esp32_s3_touch_amoled_1_8`); [`components/board/`](components/board/) is a thin seam over it. The Phase 1 sensors are live: the PCF85063 RTC ticks, the QMI8658 reads ~1 g at rest, the AXP2101 reports battery, and the external MAX30102 yields live heart rate (~81 bpm) + SpO2 (98–99%) plus a live rolling-window RMSSD. **Phase 2 recording is bench-validated over USB on ESP-IDF v6.0.2:** the microSD mounts, an on-screen **Start** opens the log, and continuous 30 s epochs write to the card. In TRACKING the panel blanks (the dominant load) but LVGL/touch stay live so the on-screen **Stop** button remains reachable — so the CPU stays full-speed (dropping into DFS/light-sleep glitched the still-live QSPI panel back on mid-session); deep CPU sleep is deferred, needing a hardware wake source. The *8 h on-battery* overnight run is still open (no Li-Po attached; the AXP2101 gauge reads 0%).
 
-**Phase 4 update — watch UI on hardware:** the UI is now an **11-tile swipeable LVGL app** (`components/ui`): watch face, live vitals (HR / SpO2 / real HRV / SQI + a **live PPG pulse waveform**), tracking clock, morning-report (score / hypnogram / heart & O2), position, history, alarm, a scrollable settings list, and a **PPG-debug tile** (the tuning graph + rate/HR/HRV/SQI readout, kept from the pre-watch-UI display) — plus **display-sleep + double-tap-to-wake**. The watch / live / tracking / debug tiles read live sensors; report / position / history render a sample night pending on-device scoring + Phase 2.5. Interactive design reference: [`../docs/watch-ui-mockup.html`](../docs/watch-ui-mockup.html).
+**UI (Phase 4):** an **11-tile swipeable LVGL app** (`components/ui`) — watch face (with a **Start-tracking** shortcut), live vitals (HR / SpO2 / real HRV / SQI + a **live PPG pulse waveform**), a tracking tile carrying the **Start/Stop button**, score, hypnogram, heart & O2, position, history, alarm, a scrollable settings list, and a dev-only **PPG-debug tile** (tuning graph + rate/HR/HRV/SQI) — plus **display-sleep + double-tap-to-wake**. The watch / live-vitals / tracking / PPG-debug tiles read live sensors; the score / hypnogram / heart & O2 / position / history tiles render a baked-in **sample** night pending on-device scoring (a `TODO(phase3)` in `sleep_core` — an offline prototype in `tools/score_night.py`) and Phase 2.5 body sensors. `bodynet` and `sync` remain stubs. Milestones: [`../PLAN.md`](../PLAN.md); interactive design reference: [`../docs/watch-ui-mockup.html`](../docs/watch-ui-mockup.html).
 
 ## Build / flash / monitor
 
@@ -44,10 +44,10 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-At this stage a build boots, brings up the shared I2C bus, and starts the two
-tasks (`sensor` pinned to core 1, `ui` on core 0); the sensor task now reads the
-RTC, IMU, battery, and MAX30102 PPG live, while the not-yet-implemented
-UI/recording/sync pieces still log stubs.
+A build boots, brings up the shared I2C bus, and starts the two tasks (`sensor`
+on core 1, `ui` on core 0): the sensor task reads the RTC, IMU, battery, and
+MAX30102 live and drives the LVGL watch UI + SD epoch logging, while `bodynet`
+(Phase 2.5) and `sync` (Phase 5) still log stubs.
 
 ## Layout
 
@@ -58,14 +58,18 @@ firmware/
 ├── partitions.csv            # app + storage (night logs go to microSD, not flash)
 ├── main/                     # app_main: dual-core task setup (sense | UI)
 └── components/
-    ├── board/               # board seam — delegates to the managed Waveshare BSP; ONLY board-specific code [phase0/2]
-    ├── max30102/             # MAX3010x PPG driver (MAX30102→30101)    [phase1]
-    ├── ppg/                  # filtering, beat detect, IBI/HR/SpO2/SQI [phase1]
-    ├── actigraphy/           # QMI8658 wrist activity counts           [phase1]
-    ├── bodynet/              # BLE central: WT9011DCL body sensors+H10 [phase2.5]
-    ├── sleep_core/           # epoch record, session SM, HRV, scoring  [phase2-3]
-    ├── ui/                   # LVGL watch UI: 11-tile swipeable app     [phase0/4]
-    └── sync/                 # BLE GATT log-pull (P5) → MQTT to HA+CPAP [phase5/integration]
+    ├── board/                # board seam over the managed Waveshare BSP; ONLY board-specific code   [phase0/2]
+    ├── max30102/             # MAX3010x PPG driver (MAX30102 → 30101)                                 [phase1]
+    ├── ppg/                  # despike + band-pass, beat detect, IBI/HR/SpO2/SQI, live RMSSD          [phase1]
+    ├── actigraphy/           # QMI8658 wrist activity counts (accel-only)                             [phase1]
+    ├── rtc/                  # PCF85063A real-time clock driver                                       [phase0/1]
+    ├── pmu/                  # AXP2101 PMU: VBUS / charge state / battery %                            [phase0/1]
+    ├── power/                # ACTIVE/TRACKING: panel off + UI-gate (CPU full-speed; deep sleep deferred) [phase2]
+    ├── sleep_core/           # epoch assembler + session FSM + per-epoch RMSSD (scoring = TODO phase3) [phase2/3]
+    ├── sd_logger/            # crash-safe 14-column CSV epoch logger                                  [phase2]
+    ├── bodynet/              # BLE central: WT9011DCL body sensors + H10 — STUB                       [phase2.5]
+    ├── ui/                   # LVGL watch UI: 11-tile swipeable app                                   [phase0/4]
+    └── sync/                 # BLE GATT log-pull → MQTT to HA + CPAP — STUB                           [phase5]
 ```
 
 > **Why `board/` doesn't use the vendor `bsp_display_start()`:** the managed Waveshare BSP (v2.0.3) never releases the FT3168 touch reset via the TCA9554 IO-expander (both `LCD_RST` and `TOUCH_RST` are `NC`), so touch is mute at `0x38` and the vendor `bsp_display_start()` `ESP_ERROR_CHECK`s touch init → panic loop. `board_display_start()` instead: (1) pulses TCA9554 pins `EXIO0–2` low→high to release the LCD/touch resets (matching Waveshare's own FT3168 example), (2) brings up the CO5300 + LVGL directly via `bsp_display_new()` + `esp_lvgl_port`, and (3) adds touch **non-fatally** (a probe miss degrades to display-only instead of a boot loop). Result: display **and** touch work.
