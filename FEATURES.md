@@ -11,12 +11,14 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 
 ## 1. Sleep Tracking (core)
 
+> **Status:** the scoring pipeline (sleep/wake, staging, hypnogram, score, metrics) runs today as an **offline prototype** in [`tools/score_night.py`](tools/) (validated on synthetic nights, ~98% sleep/wake); the on-device port into `sleep_core` is still `TODO(phase3)`.
+
 - **[P0] Sleep/wake detection** per 30 s epoch (actigraphy-based, HR-assisted)
 - **[P0] Sleep staging estimate** — awake / light / deep / REM from movement + HR (HRV as an optional refinement)
 - **[P0] Hypnogram** — full-night stage timeline
 - **[P0] Sleep summary metrics** — total sleep time, time in bed, sleep efficiency, sleep-onset latency, WASO (wake after sleep onset), number of awakenings
 - **[P0] Sleep score** — single 0–100 number blending duration, efficiency, continuity, and stage balance
-- **[P0] Manual session start/stop** — explicit "start sleep" control for v1
+- **[P0] Session start/stop** — v1 uses an **on-screen Start/Stop button** (a Tracking-tile toggle + a watch-face shortcut, wired to `sleep_core_request_start/stop()`); automatic sleep detection later
 - **[P1] Automatic sleep detection** — sensor-driven session start/end, no button needed
 - **[P1] Nap detection** — short daytime sessions scored separately from nights
 - **[P2] Restlessness index** — per-night tossing/turning intensity and position-change count
@@ -31,13 +33,13 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 - **[P2] Frequency-domain HRV** — LF/HF from ~5-min clean windows (needs longer continuous captures)
 - **[P1] SpO2 desaturation events** — count and duration of dips below a threshold (informational, not diagnostic)
 - **[P1] Respiratory rate** — breaths/min derived from PPG baseline modulation
-- **[P2] Live vitals screen** — real-time HR/SpO2/waveform view (doubles as a sensor-placement checker)
+- **[P0] Live vitals screen** *(built)* — real-time HR / SpO2 / HRV / SQI + a live PPG waveform (doubles as a sensor-placement checker); one of the live watch-UI tiles
 - **[P2] Abnormality flags** — "resting HR 15% above your baseline this week"-style nudges, clearly labeled non-medical
 
 ## 3. Movement & Activity
 
 - **[P0] Actigraphy pipeline** — band-passed accel magnitude → per-epoch activity counts (wrist)
-- **[P1] Wake-on-motion** — IMU interrupt wakes the system from low-power states
+- **[dropped] Wake-on-motion** — IMU interrupt wakes the system from low-power states. *Not feasible on this board — the QMI8658 INT line is not routed; TRACKING uses timer-wake instead.*
 - **[P2] Daytime step counting** — QMI8658 pedometer; makes it a passable daytime watch too
 - **[P2] Wrist-off detection** — accel stillness + PPG contact loss ends/pauses a session instead of logging garbage
 
@@ -69,13 +71,13 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 
 ## 6. Watch & Daily UX
 
-> **Status (Phase 4):** an 11-tile swipeable LVGL watch UI is built and running on hardware — watch face, live vitals (with a live PPG waveform + real HRV/SQI), tracking, morning report, position, history, alarm, settings, and a PPG-debug tile — plus display-sleep + double-tap-to-wake. Live tiles read real sensors; report/history render a sample night pending on-device scoring. Interactive mockup: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
+> **Status (Phase 4):** the 11-tile swipeable LVGL watch UI is built and running on hardware — in order: watch face · live vitals · tracking · score · hypnogram · heart & O2 · position · history · alarm · settings · PPG-debug — plus display-sleep + double-tap-to-wake. Four tiles read live sensors (watch, live vitals, tracking, and the dev-only PPG-debug tuning tile); the score / hypnogram / heart & O2 / position / history tiles render a baked-in **sample** night pending on-device scoring and the body-sensor network (§3a). Interactive mockup (the dev-only PPG-debug tile is intentionally omitted): [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
 
 - **[P0] Watch face** — time, date, battery, last night's score
 - **[P0] Tracking screen** — minimal dimmed clock during sleep, "recording" indicator
 - **[P0] Morning report** — score card → hypnogram → HR/SpO2 charts, swipeable
 - **[P0] Settings** — alarm, brightness, start/stop mode, time
-- **[P1] Tap-to-wake** — touch the display to wake it; stays off until summoned
+- **[P0] Double-tap-to-wake** *(built)* — blank the display (Settings → Sleep display) and double-tap anywhere to wake it; touch stays live at brightness 0
 - **[P1] 7-night history** — on-device trend view of scores and key metrics
 - **[P2] Always-on display mode** — dim clock (AMOLED-friendly, black background), with burn-in mitigation (pixel shifting)
 - **[P2] Do-not-disturb / theater mode** — guarantee zero light and sound during the night
@@ -84,7 +86,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 ## 7. Data, Storage & Sync
 
 - **[P0] Crash-safe epoch logging to microSD** — append-only records; a power loss never corrupts a night
-- **[P0] Raw waveform logging** — full-rate PPG + accel streams to SD (the S3's PSRAM makes this the default, not an option); every night becomes re-analyzable forever
+- **[P1] Raw waveform logging** — full-rate PPG + accel to SD so every night is re-analyzable forever (the S3's PSRAM makes this feasible). *Design goal — today raw PPG streams over USB (`PPG_RAW_STREAM` → `tools/capture_ppg.py`) and the SD log holds per-epoch summaries, not raw waveforms.*
 - **[P0] Offline analysis toolkit** — Python scripts to plot nights, tune the scorer, and validate against reference devices
 - **[P1] USB mass-storage offload** — plug into a PC, SD card appears as a drive
 - **[P1] Live USB streaming mode** — raw PPG/accel over USB CDC for algorithm development

@@ -2,6 +2,8 @@
 
 Now that the hardware is in hand (board, MAX30102 — MAX30101 arriving, **Polar H10**), the smart engineering move *before* building the full firmware is to de-risk a few key assumptions with small, throwaway spikes — mainly power, SD throughput, and sensor coupling. One spike (S1) also checks whether the **optional** HRV feature is feasible on your wrist; HRV is a nice-to-have, so a poor result there just means HRV is deferred or dropped, not that the project is blocked.
 
+> **Status note (the build ran ahead of these spikes):** Phases 0–2 were built and hardware-validated without formally running S1–S5 first. That's fine — these remain the open de-risking items, now with sharper targets: **S3/S4** are the specific blockers on the Phase-2 "8 h on battery" exit gate (SD throughput + overnight mAh, once a Li-Po is attached), and **S1** is the go/no-go for the fuller HRV-grade path (a basic live RMSSD already ships). Run them against the real recorded nights the firmware now produces.
+
 This doc covers three things:
 1. **De-risking spikes** — the riskiest assumptions and the minimal experiments that test them (§1).
 2. **HRV validation protocol** — how to use the H10 as ground truth *if* you pursue the optional HRV feature (§2).
@@ -11,7 +13,7 @@ This doc covers three things:
 
 ## 1. De-risking spikes (run in this order, before full builds)
 
-Each is a rough sketch, not production code — though several feed directly into the real `ppg`/`sleep_core`/`bsp` components. Do them on the real board, on your own wrist.
+Each is a rough sketch, not production code — though several feed directly into the real `ppg`/`sleep_core`/`board` components. Do them on the real board, on your own wrist.
 
 | # | Assumption under test | Minimal experiment | Pass bar | If it fails |
 |---|---|---|---|---|
@@ -72,7 +74,7 @@ Plan: add `refmon` as a **build-flag-gated dev component** (compiled out of rele
 
 ## 4. Analysis & test tooling (build alongside the spikes)
 
-- **`tools/` (Python):** load SD logs (and the on-device paired wrist+H10 log), match beats, produce Bland–Altman plots and hypnogram/HR overlays. Build this *with* spike S1 so every experiment is measurable from day one.
+- **`tools/` (Python):** the offline toolkit now exists — `sleeplog`/`read_night` load and validate night logs, `gen_synthetic_night`/`score_night` prototype the scorer against ground truth, and `capture_ppg`/`analyze_ppg` run the raw-PPG capture + beat-detector loop (scipy/NeuroKit2). Extend these to match wrist vs H10 beats and produce Bland–Altman plots / hypnogram overlays for S1. See [tools/README.md](tools/README.md).
 - **Golden test vectors:** capture a handful of labeled PPG snippets (clean, ectopic, motion) and freeze them as host-side unit tests for the beat detector, so future DSP changes are regression-checked on a laptop with no hardware in the loop.
 
 ---
