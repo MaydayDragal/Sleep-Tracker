@@ -53,7 +53,8 @@ typedef struct {
     uint16_t rmssd_ms;       // HRV for clean windows; 0 if not computed this epoch
     uint8_t  spo2_pct;
     uint8_t  sqi;            // 0..100 epoch-quality proxy (see SLEEP_FLAG_SQI_PROXY)
-    uint8_t  batt_pct;
+    uint8_t  batt_pct;       // AXP2101 fuel gauge % (0 + BATT_INVALID when uncalibrated)
+    uint16_t vbat_mv;        // battery voltage (mV) — trustworthy even when batt_pct reads 0
     uint8_t  beat_accept;    // % accepted beats backing hr_* / rmssd (§3.3)
     uint16_t flags;          // SLEEP_FLAG_* bitfield
 } sleep_epoch_t;

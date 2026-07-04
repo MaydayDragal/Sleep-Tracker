@@ -4,3 +4,6 @@ __pycache__/
 
 # Claude Code personal/local settings (per-project)
 .claude/settings.local.json
+
+# WiFi credentials for NTP (never commit real secrets)
+firmware/components/nettime/wifi_config.h

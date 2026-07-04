@@ -265,6 +265,7 @@ static void finalize_epoch(void)
     pmu_status_t p;
     if (pmu_read(&p) == ESP_OK) {
         ep.batt_pct = (p.batt_pct > 0) ? (uint8_t)p.batt_pct : 0u;
+        ep.vbat_mv  = p.vbat_mv;   // voltage is trustworthy even when the % gauge reads 0
         if (p.batt_pct <= 0) flags |= SLEEP_FLAG_BATT_INVALID;
     } else {
         flags |= SLEEP_FLAG_BATT_INVALID | SLEEP_FLAG_SENSOR_LOST;
