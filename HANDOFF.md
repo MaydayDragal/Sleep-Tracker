@@ -23,7 +23,7 @@ Read [PLAN.md §7 "Current status"](PLAN.md) for the authoritative per-phase sta
 
 | Component | State |
 |---|---|
-| `board` `max30102` `ppg` `actigraphy` `rtc` `pmu` `power` `sd_logger` | **Real**, on hardware. `ppg` = despike + band-pass + adaptive beat detect + **real composite SQI** + live rolling-window RMSSD. ACTIVE runs continuously at a **user-selectable PPG rate (50/100/200/400/800 Hz, Settings)** — no auto HR/HRV switching. `sd_logger` also writes **raw PPG to SD**, PSRAM-buffered and flushed one block per PPG window (`*_ppg.bin`; reader `tools/read_raw_ppg.py`). |
+| `board` `max30102` `ppg` `actigraphy` `rtc` `pmu` `power` `sd_logger` `nettime` | **Real**, on hardware. `ppg` = despike + band-pass + adaptive beat detect + **real composite SQI** + live rolling-window RMSSD. ACTIVE runs continuously at a **user-selectable PPG rate (50/100/200/400/800 Hz, Settings)** — no auto HR/HRV switching. `sd_logger` writes the 15-col epoch CSV (now incl. **battery voltage `vbat_mv`** — trustworthy vs the 0% gauge) **plus raw PPG to SD**, PSRAM-buffered, one block per PPG window (`*_ppg.bin`; reader `tools/read_raw_ppg.py`). `nettime` sets the RTC from NTP at boot (brief WiFi, then off; creds in a gitignored `wifi_config.h`). |
 | `sleep_core` | **Real** epoch assembler + button-driven session FSM + per-epoch RMSSD. **On-device scoring = `TODO(phase3)`** (`do_stop()`). |
 | `ui` | **Real** 11-tile watch UI + **on-screen Start/Stop tracking button** + HR-sample-rate setting + dev-only PPG-debug tile + display-sleep/double-tap-wake. Report/position/history tiles are **sample data**. |
 | `bodynet` | **Stub** (Phase 2.5). CSV `body_position`/`body_activity` columns are always 0. |

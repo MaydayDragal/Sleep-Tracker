@@ -124,7 +124,7 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
   - `actigraphy/` — QMI8658 (wrist) driver config + per-epoch activity counts (band-passed accel magnitude). Wrist movement only; body position comes from `bodynet`.
   - `bodynet/` — **BLE central** for 1..N WT9011DCL body sensors (+ the H10 reference): pairing/bonding, per-sensor role/placement, angle→sleep-position classification, per-sensor movement. *(Stub — Phase 2.5; the CSV's body-position/movement columns are present but 0 until this lands.)*
   - `sleep_core/` — epoch assembler + night session state machine + opportunistic per-epoch RMSSD. **On-device sleep scoring is `TODO(phase3)`** — the algorithm currently lives offline in `tools/`. The CSV writer is a separate `sd_logger` component.
-  - `sd_logger/` — crash-safe 14-column CSV epoch logger (fsync-per-epoch, torn-tail tolerant, card-pull remount/resume); implements the `sleep_core` persistence vtable.
+  - `sd_logger/` — crash-safe 15-column CSV epoch logger (fsync-per-epoch, torn-tail tolerant, card-pull remount/resume); implements the `sleep_core` persistence vtable.
   - `power/` — ACTIVE vs TRACKING power profiles (DFS + automatic tickless light-sleep via `esp_pm_configure`).
   - `rtc/` · `pmu/` — hand-rolled register-level PCF85063A and AXP2101 drivers.
   - `ui/` — LVGL 11-tile watch UI (incl. a live-vitals tile and a dev-only PPG-debug tile).
@@ -142,7 +142,7 @@ PCF85063 ───────────────────► timestamps
                                                                   full-night re-pass in the morning)
 ```
 
-**Epoch record (one 14-column CSV row):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI-proxy, beat-acceptance %, battery %, flags. A full night is ~1000 rows ≈ tens of KB — trivial for SD. The schema is defined once in [`tools/sleeplog.py`](tools/sleeplog.py) (mirroring `sd_logger.c`); the body position/movement columns are present but 0 until Phase 2.5. *(Full-rate raw PPG currently streams over USB for offline tuning rather than to SD; raw-to-SD logging is a design goal, not yet built.)*
+**Epoch record (one 15-column CSV row):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI-proxy, battery % + **battery voltage (mV)**, beat-acceptance %, flags. A full night is ~1000 rows ≈ tens of KB — trivial for SD. The schema is defined once in [`tools/sleeplog.py`](tools/sleeplog.py) (mirroring `sd_logger.c`); the body position/movement columns are present but 0 until Phase 2.5. *(Raw PPG is also logged to SD during a recording — buffered in PSRAM, one block per PPG window, to `<ts>_ppg.bin`; reader `tools/read_raw_ppg.py`. It still streams over USB in ACTIVE for live tuning.)*
 
 ### 3.2 Sleep scoring approach
 
@@ -296,7 +296,7 @@ Engineering techniques to apply as the relevant components are built — most im
 
 Open questions to settle as we implement (defaults chosen so work can start):
 1. **Session start:** *decided — on-screen Start/Stop button* (a Tracking-tile toggle + a watch-face shortcut, wired to `sleep_core_request_start/stop()`); auto-detection later.
-2. **Log format:** *decided — crash-safe 14-column CSV* (append-only, fsync-per-epoch, torn-tail tolerant); schema in `tools/sleeplog.py`, reader `tools/read_night.py`.
+2. **Log format:** *decided — crash-safe 15-column CSV* (append-only, fsync-per-epoch, torn-tail tolerant); schema in `tools/sleeplog.py`, reader `tools/read_night.py`.
 3. **Strap/enclosure:** 3D-printed case with sensor window vs. sewing the breakout into a strap pocket. *(Still open.)*
 4. **Body-sensor count/placement:** default is a single torso sensor for position; limb sensors (limb-movement detection) are an opt-in extension. How many to support as a hard cap?
 
@@ -324,7 +324,7 @@ Sleep-Tracker/
 │       ├── max30102/  ppg/  actigraphy/   # sensing + PPG pipeline (HR/SpO2/SQI/live RMSSD)
 │       ├── rtc/  pmu/        # PCF85063A + AXP2101 register-level drivers
 │       ├── sleep_core/      # epoch assembler + session SM + per-epoch RMSSD (on-device scoring = TODO phase3)
-│       ├── sd_logger/       # crash-safe 14-column CSV epoch logger
+│       ├── sd_logger/       # crash-safe 15-column CSV epoch logger
 │       ├── power/           # ACTIVE vs TRACKING profiles (DFS + tickless light-sleep)
 │       ├── bodynet/         # BLE central: WT9011DCL body sensors + H10  — STUB (Phase 2.5)
 │       └── ui/  sync/       # LVGL 11-tile watch UI; sync (BLE/MQTT → HA + CPAP) — STUB (Phase 5)
