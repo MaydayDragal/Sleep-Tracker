@@ -247,9 +247,13 @@ static void sensor_task(void *arg)
     // ~80 ms, so the poll loops below drain it every ~40 ms.
     const max30102_config_t ppg_cfg = {
         .sample_rate_hz  = 400,
-        .led_current_red = 60,   // ~12 mA (0.2 mA/step). Brighter LEDs => higher
-        .led_current_ir  = 60,   // perfusion + SNR; ~208k finger DC @18-bit leaves
-                                 // ~20% headroom below the 0x3FFFF (262143) ceiling.
+        .led_current_red = 50,   // ~10 mA (0.2 mA/step). Chosen from the LED x
+        .led_current_ir  = 50,   // averaging sweep (tools/ppg_sweep.py): peak SQI
+                                 // (0.38) at ~179k finger DC = 68% of the 0x3FFFF
+                                 // (262143) ceiling — clipping starts at LED>=70, so
+                                 // this keeps margin for firmer contact. smp_ave left
+                                 // at 1: the sweep showed on-chip averaging degrades
+                                 // HR/SNR through the pipeline (decimated-rate issue).
         .int_gpio        = -1,   // polled FIFO; no INT line on this board
     };
     max30102_init(bus, &ppg_cfg);
@@ -357,11 +361,14 @@ static void ui_task(void *arg)
 // whole run (~5 min). Higher SNR/SQI is better, but clip_pct must stay ~0.
 //   pio run -d firmware -e esp32s3-ppg-sweep -t upload
 //   python tools/ppg_sweep.py COM6
-#define SWEEP_BASE_RATE   400      // per-channel rate; 16-bit ADC => full scale below.
-                                   // Clip headroom is ~rate-independent, so the LED
+#define SWEEP_BASE_RATE   400      // per-channel rate. The driver returns 18-bit-
+                                   // justified counts (masked to 0x3FFFF) at every
+                                   // rate — pulse width sets resolution, not the
+                                   // full-scale count — so the clip ceiling and DC
+                                   // magnitude are ~rate-independent and the LED
                                    // verdict transfers to the 50 Hz HR mode too. 400
                                    // keeps SR/ave usable up to ave=32 (=> 12.5 Hz out).
-#define SWEEP_FS_COUNTS   65535    // 16-bit ADC full scale @400 Hz (clip reference)
+#define SWEEP_FS_COUNTS   262143   // 18-bit ADC full scale (0x3FFFF) — clip reference
 #define SWEEP_SETTLE_MS   1500     // discard while filters/baseline/peak-amp settle
 #define SWEEP_COLLECT_MS  5000     // measurement window per combo
 
