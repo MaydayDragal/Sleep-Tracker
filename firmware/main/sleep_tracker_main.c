@@ -247,8 +247,9 @@ static void sensor_task(void *arg)
     // ~80 ms, so the poll loops below drain it every ~40 ms.
     const max30102_config_t ppg_cfg = {
         .sample_rate_hz  = 400,
-        .led_current_red = 40,
-        .led_current_ir  = 40,
+        .led_current_red = 60,   // ~12 mA (0.2 mA/step). Brighter LEDs => higher
+        .led_current_ir  = 60,   // perfusion + SNR; ~208k finger DC @18-bit leaves
+                                 // ~20% headroom below the 0x3FFFF (262143) ceiling.
         .int_gpio        = -1,   // polled FIFO; no INT line on this board
     };
     max30102_init(bus, &ppg_cfg);
