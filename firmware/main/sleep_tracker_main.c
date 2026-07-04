@@ -347,6 +347,105 @@ static void ui_task(void *arg)
     }
 }
 
+#ifdef SLEEPTRK_PPG_SWEEP
+// -- PPG characterization sweep ----------------------------------------------
+// A dedicated diagnostic build (env esp32s3-ppg-sweep) that finds the best LED
+// current + on-chip averaging for the current sensor/skin. It steps LED current
+// x SMP_AVE at a fixed base rate, feeds each combo through the live ppg pipeline,
+// and prints one CSV row per combo over the console (prefix "SWEEP,"). Capture +
+// rank with tools/ppg_sweep.py. Put a finger on the sensor and hold still for the
+// whole run (~5 min). Higher SNR/SQI is better, but clip_pct must stay ~0.
+//   pio run -d firmware -e esp32s3-ppg-sweep -t upload
+//   python tools/ppg_sweep.py COM6
+#define SWEEP_BASE_RATE   400      // per-channel rate; 16-bit ADC => full scale below.
+                                   // Clip headroom is ~rate-independent, so the LED
+                                   // verdict transfers to the 50 Hz HR mode too. 400
+                                   // keeps SR/ave usable up to ave=32 (=> 12.5 Hz out).
+#define SWEEP_FS_COUNTS   65535    // 16-bit ADC full scale @400 Hz (clip reference)
+#define SWEEP_SETTLE_MS   1500     // discard while filters/baseline/peak-amp settle
+#define SWEEP_COLLECT_MS  5000     // measurement window per combo
+
+typedef struct {
+    double   ir_sum, snr_sum, sqi_sum;
+    uint32_t n, ir_max, clip, vn;
+    float    hr;
+    bool     valid;
+} sweep_acc_t;
+
+// Drain the FIFO + drive the ppg pipeline for `ms`. When `a` is non-NULL, also
+// accumulate raw-DC / clipping stats and time-average the pipeline's snr/sqi.
+static void sweep_collect(uint32_t ms, sweep_acc_t *a)
+{
+    const int64_t t0 = esp_timer_get_time();
+    while (esp_timer_get_time() - t0 < (int64_t)ms * 1000) {
+        max30102_sample_t fifo[32];
+        size_t got = 0;
+        if (max30102_read_fifo(fifo, 32, &got) == ESP_OK && got > 0) {
+            ppg_beat_t beat;
+            ppg_process(fifo, got, &beat);
+            if (a) {
+                for (size_t i = 0; i < got; i++) {
+                    a->ir_sum += (double)fifo[i].ir;
+                    if (fifo[i].ir > a->ir_max) a->ir_max = fifo[i].ir;
+                    if (fifo[i].ir >= (uint32_t)(0.98f * SWEEP_FS_COUNTS)) a->clip++;
+                    a->n++;
+                }
+                const ppg_vitals_t v = ppg_current_vitals();
+                a->snr_sum += v.snr_db;
+                a->sqi_sum += v.sqi;
+                a->vn++;
+                a->hr    = v.hr_bpm;
+                a->valid = v.valid;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+static void ppg_sweep_run(i2c_master_bus_handle_t bus)
+{
+    static const uint8_t leds[] = {30, 40, 50, 60, 70, 80, 90};
+    static const uint8_t aves[] = {1, 2, 4, 8, 16, 32};
+
+    const max30102_config_t cfg = {
+        .sample_rate_hz  = SWEEP_BASE_RATE,
+        .led_current_red = leds[0],
+        .led_current_ir  = leds[0],
+        .int_gpio        = -1,
+    };
+    if (max30102_init(bus, &cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "SWEEP: MAX3010x not found — aborting");
+        return;
+    }
+
+    printf("SWEEP,led,ave,out_hz,n,ir_dc,ir_max,clip_pct,snr_db,sqi,hr,valid\n");
+    for (size_t li = 0; li < sizeof leds; li++) {
+        for (size_t ai = 0; ai < sizeof aves; ai++) {
+            max30102_set_led_current(leds[li], leds[li], 0);
+            max30102_set_smp_ave(aves[ai]);
+            const uint16_t out = max30102_output_rate_hz();
+            ppg_set_rate((float)out);
+            ppg_reset();
+
+            sweep_collect(SWEEP_SETTLE_MS, NULL);          // settle, discard
+            sweep_acc_t a = {0};
+            sweep_collect(SWEEP_COLLECT_MS, &a);           // measure
+
+            const double ir_dc  = a.n  ? a.ir_sum / a.n        : 0.0;
+            const double clip_p = a.n  ? 100.0 * a.clip / a.n  : 0.0;
+            const double snr    = a.vn ? a.snr_sum / a.vn      : 0.0;
+            const double sqi    = a.vn ? a.sqi_sum / a.vn      : 0.0;
+            printf("SWEEP,%u,%u,%u,%lu,%.0f,%lu,%.2f,%.2f,%.3f,%.0f,%d\n",
+                   leds[li], aves[ai], (unsigned)out, (unsigned long)a.n,
+                   ir_dc, (unsigned long)a.ir_max, clip_p, snr, sqi,
+                   (double)a.hr, a.valid ? 1 : 0);
+        }
+    }
+    printf("SWEEP,DONE\n");
+    ESP_LOGI(TAG, "SWEEP complete — reflash esp32s3-amoled to return to the app");
+}
+#endif // SLEEPTRK_PPG_SWEEP
+
 void app_main(void)
 {
     // Phase-0 bring-up aid: give a freshly-attached serial monitor time to
@@ -354,6 +453,19 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     ESP_LOGI(TAG, "Sleep Tracker booting (Waveshare ESP32-S3-Touch-AMOLED-1.8)");
+
+#ifdef SLEEPTRK_PPG_SWEEP
+    // Diagnostic build: bring up only the shared I2C bus (no WiFi/UI/tracking)
+    // and run the LED-current x averaging sweep, then idle.
+    ESP_LOGI(TAG, "PPG SWEEP build — LED-current x averaging characterization");
+    ESP_ERROR_CHECK(board_init());
+    i2c_master_bus_handle_t sweep_bus;
+    ESP_ERROR_CHECK(board_i2c_get_bus(&sweep_bus));
+    ppg_sweep_run(sweep_bus);
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+#else
 
     // NTP time first, BEFORE any I2C is up: WiFi's interrupt latency wedges the
     // shared I2C bus if they overlap (froze the display/touch). nettime brings
@@ -377,4 +489,5 @@ void app_main(void)
         ESP_LOGE(TAG, "task create failed (ui=%d sensor=%d) — halting", (int)ok_ui, (int)ok_se);
         abort();
     }
+#endif // SLEEPTRK_PPG_SWEEP
 }

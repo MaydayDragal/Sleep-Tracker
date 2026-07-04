@@ -66,6 +66,16 @@ esp_err_t max30102_read_fifo(max30102_sample_t *out, size_t max, size_t *out_cou
 // by the HR/HRV duty-cycle and the Settings "HR sample rate" control.
 esp_err_t max30102_set_sample_rate(uint16_t hz);
 
+// Set the LED drive currents at runtime (~0.2 mA/step, datasheet Table 8). Higher
+// current raises perfusion + SNR at the cost of power and ADC headroom. `green` is
+// written only when non-zero (leaves LED3 untouched on a MAX30102).
+esp_err_t max30102_set_led_current(uint8_t red, uint8_t ir, uint8_t green);
+
+// Set on-chip sample averaging at runtime (1/2/4/8/16/32; 0 or 1 => none) and
+// flush the FIFO. Output rate becomes sample_rate/ave — re-read via
+// max30102_output_rate_hz() and pass it to ppg_set_rate().
+esp_err_t max30102_set_smp_ave(uint8_t ave);
+
 // Effective FIFO OUTPUT rate = configured sample rate / SMP_AVE. This is the rate
 // the consumer actually sees, and the value to pass to ppg_set_rate(). Equal to
 // the configured rate when averaging is off.

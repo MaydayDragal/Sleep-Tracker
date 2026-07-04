@@ -268,6 +268,32 @@ esp_err_t max30102_set_sample_rate(uint16_t hz)
     return err;
 }
 
+esp_err_t max30102_set_led_current(uint8_t red, uint8_t ir, uint8_t green)
+{
+    if (s_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t err = wr(REG_LED1_PA, red);
+    if (err == ESP_OK) err = wr(REG_LED2_PA, ir);
+    if (err == ESP_OK && green) err = wr(REG_LED3_PA, green);   // MAX30101 only
+    return err;
+}
+
+esp_err_t max30102_set_smp_ave(uint8_t ave)
+{
+    if (s_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_smp_ave = ave ? ave : 1;
+    // SMP_AVE[7:5] | ROLLOVER_EN(bit4) | A_FULL[3:0]=0 — matches init.
+    esp_err_t err = wr(REG_FIFO_CONFIG, (uint8_t)((smp_ave_code(s_smp_ave) << 5) | 0x10));
+    // Flush so the consumer doesn't mix pre-/post-average cadence.
+    wr(REG_FIFO_WR_PTR, 0x00);
+    wr(REG_OVF_COUNTER, 0x00);
+    wr(REG_FIFO_RD_PTR, 0x00);
+    return err;
+}
+
 uint16_t max30102_output_rate_hz(void)
 {
     const uint8_t ave = s_smp_ave ? s_smp_ave : 1;

@@ -33,6 +33,7 @@ py -m pip install pyserial numpy scipy neurokit2
 | `score_night.py` | Prototype of the Phase-3 morning re-pass: sleep/wake, staging, metrics, a 0–100 sleep score, an SVG hypnogram, and validation against ground truth. **Offline only — not yet ported on-device.** |
 | `capture_ppg.py` | Captures the firmware's `R,<ir>,<red>` raw-PPG USB stream (enabled by `PPG_RAW_STREAM=1` in `main`) for a window into an `ir,red` CSV that `analyze_ppg.py` consumes. |
 | `analyze_ppg.py` | Offline PPG analysis: band-pass + beat detection via **scipy and NeuroKit2**, HR, HRV (RMSSD), and a plot; `--demo` runs a synthetic sanity check. The offline half of the PPG-accuracy loop — develop/validate the beat detector here, then port to `components/ppg`. |
+| `ppg_sweep.py` | Captures + ranks the firmware's LED-current × on-chip-averaging characterization sweep (diagnostic build `esp32s3-ppg-sweep`, `-D SLEEPTRK_PPG_SWEEP`). Hard-resets the board, reads one `SWEEP,…` CSV row per combo, and recommends the best LED current + `smp_ave` by SQI/SNR among non-clipping combos that lock a valid HR. Hold a fingertip still for the ~5 min run. |
 
 ## Quickstart
 
