@@ -122,10 +122,9 @@
   .wf .lastnight .meta span{display:block;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
   .wf .vit{margin-top:18px;display:flex;gap:26px;color:var(--ink-2);font-size:14px}
   .wf .vit b{color:var(--ink);font-weight:600}
-  .wf .start{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);
-    font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--ink-3);
-    border:1px solid var(--hair);border-radius:20px;padding:9px 18px}
-  .wf .start b{color:var(--accent)}
+  .wf .startbtn{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+    font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;
+    background:var(--accent);border:none;border-radius:22px;padding:11px 26px}
 
   /* ---------- generic stat grid ---------- */
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
@@ -162,6 +161,8 @@
   .trk .row .c{flex:1;background:var(--surf-1);border:1px solid var(--hair-soft);border-radius:14px;padding:11px 6px}
   .trk .row .c .k{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase}
   .trk .row .c .v{font-size:20px;font-weight:600;margin-top:4px}
+  .trk .trkbtn{margin-top:24px;font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--ink);
+    cursor:pointer;background:var(--crit);border:none;border-radius:14px;padding:14px 42px}
   .trk .hint{position:absolute;bottom:26px;left:0;right:0;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
   .trk .hint b{color:var(--accent-2)}
 
@@ -291,7 +292,7 @@
             <div class="meta"><b>Last night</b><span>7h 12m · Good</span></div>
           </div>
           <div class="vit"><div>RHR <b class="num">54</b></div><div>SpO₂ <b class="num">96%</b></div></div>
-          <div class="start">Unplug to <b>start sleep</b></div>
+          <button class="startbtn">Start sleep tracking</button>
         </div>
       </section>
 
@@ -330,7 +331,8 @@
             <div class="c"><div class="k">Heart</div><div class="v num">51</div></div>
             <div class="c"><div class="k">Position</div><div class="v" style="font-size:15px">Right</div></div>
           </div>
-          <div class="hint">Screen off to save power · <b>double-tap to wake</b> · plug in to stop</div>
+          <button class="trkbtn">Stop tracking</button>
+          <div class="hint">Recording blanks the screen · <b>double-tap to wake</b></div>
         </div>
       </section>
 
@@ -457,10 +459,11 @@
           <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
         <div class="body" style="overflow-y:auto">
           <div class="arow tall"><div class="k">Brightness</div><span class="slider"><i></i></span></div>
+          <div class="arow tall"><div class="k">HR sample rate<small>live PPG rate · tap to change</small></div><span class="v" style="color:var(--accent)">50 Hz</span></div>
           <div class="arow tall"><div class="k">Display timeout<small>auto-blank after inactivity</small></div><span class="v">30 s</span></div>
           <div class="arow tall"><div class="k">Dim night clock<small>faint clock on tap while tracking</small></div><span class="tog on"><i></i></span></div>
-          <div class="arow tall"><div class="k">Start / stop mode<small>unplug from charger = track</small></div><span class="v">VBUS</span></div>
-          <div class="arow tall"><div class="k">Auto sleep detect<small>start a night without unplugging</small></div><span class="tog"><i></i></span></div>
+          <div class="arow tall"><div class="k">Start / stop mode<small>on-screen Start / Stop button</small></div><span class="v">Button</span></div>
+          <div class="arow tall"><div class="k">Auto sleep detect<small>start a night automatically</small></div><span class="tog"><i></i></span></div>
           <div class="arow tall"><div class="k">Double-tap to wake<small>blank screen, 2 taps to light it</small></div><span class="tog on"><i></i></span></div>
           <div class="arow tall"><div class="k">HRV capture<small>longer clean windows (uses power)</small></div><span class="tog"><i></i></span></div>
           <div class="arow tall"><div class="k">Do not disturb<small>silence alarms and tones</small></div><span class="tog on"><i></i></span></div>
@@ -737,7 +740,7 @@
 
   // ---- navigation ----
   const CAP = {
-    watch:['The home face — time, date, battery, and last night\'s score at a glance.','Raise-to-wake / tap · unplug to start tracking'],
+    watch:['The home face — time, date, battery, and last night\'s score at a glance.','Raise-to-wake / tap · tap Start to begin a night'],
     live:['Real-time HR with a scrolling PPG trace, SpO₂, HRV, and a signal-quality read that doubles as a placement checker.','Swipe down from the watch face'],
     tracking:['The dim, low-power view while recording a night — elapsed time, live heart rate, and body position.','Screen blanks to save power · double-tap to wake'],
     score:['The morning headline: a 0–100 sleep score, stage mix, and the core summary metrics.','Swipe left/right through the report'],

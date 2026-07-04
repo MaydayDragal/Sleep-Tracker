@@ -65,8 +65,10 @@ void      board_display_unlock(void);
 // Blank/unblank the AMOLED (CO5300 brightness 0/full) for display-off tracking.
 void      board_display_set_on(bool on);
 
-// Stop/resume the esp_lvgl_port timer task so the CPU can enter tickless light
-// sleep during tracking (the port's periodic timer would otherwise keep waking
-// it). Pair board_lvgl_stop() on entering TRACKING with board_lvgl_resume().
+// Stop/resume the esp_lvgl_port timer task so the CPU can enter deeper tickless
+// light sleep (the port's periodic timer would otherwise keep waking it). NOTE:
+// currently unused — TRACKING keeps LVGL/touch live so the on-screen Stop button
+// stays reachable; these are reserved for a future deep-sleep mode driven by a
+// hardware wake source. Always pair board_lvgl_stop() with board_lvgl_resume().
 void      board_lvgl_stop(void);
 void      board_lvgl_resume(void);

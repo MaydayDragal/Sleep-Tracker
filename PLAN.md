@@ -1,6 +1,6 @@
 # Sleep Tracker — Project Plan
 
-A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** development board with an external **MAX3010x** pulse-oximetry sensor (**MAX30102** for initial bring-up, transitioning to the **MAX30101**). The device measures heart rate, SpO2, and movement overnight, scores sleep locally, and presents results on the onboard AMOLED touch display.
+A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** development board with an external **MAX3010x** pulse-oximetry sensor (**MAX30102** for initial bring-up, transitioning to the **MAX30101**). The device records heart rate, SpO2, and movement overnight to microSD and presents results on the onboard AMOLED touch display. Sleep scoring runs today as an offline prototype in [`tools/`](tools/); the on-device scorer is Phase-3 work (§5).
 
 - Board wiki: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.8
 - Board docs: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-1.8
@@ -39,9 +39,9 @@ A wrist-worn sleep tracker built on the **Waveshare ESP32-S3-Touch-AMOLED-1.8** 
 | Subsystem | Part | Bus | Role in this project |
 |---|---|---|---|
 | MCU | ESP32-S3R8 (dual-core LX7 @240 MHz, Wi-Fi 4, BLE 5, **8 MB PSRAM**, 16 MB flash, native USB) | — | Everything; a core for sensing + a core for UI/logging; BLE/Wi-Fi for sync |
-| Display | 1.8" AMOLED 368×448, **CO5300** (on-hardware; earlier docs said SH8601) | QSPI | UI, morning report |
+| Display | 1.8" AMOLED 368×448, **CO5300** (on-hardware) | QSPI | UI, morning report |
 | Touch | FT3168 / FT6146 | I2C | UI input |
-| IMU | QMI8658 (6-axis accel + gyro) | I2C | Movement/actigraphy, wake-on-motion |
+| IMU | QMI8658 (6-axis accel + gyro) | I2C | Movement/actigraphy (polled accel; wake-on-motion INT not routed on this board) |
 | RTC | PCF85063 (backup-battery pads) | I2C | Timekeeping across resets, epoch timestamps |
 | PMU | AXP2101 | I2C | Battery charging, voltage/fuel readings, power rails |
 | Audio | ES8311 codec + mics + speaker | I2S/I2C | Smart alarm; snore detection (stretch) |
@@ -56,9 +56,9 @@ Memory note: the ESP32-S3R8 has **512 KB internal SRAM plus 8 MB PSRAM**. That h
 The external PPG sensor is an Analog Devices **MAX3010x**-family part on the shared I2C bus (address `0x57`):
 
 - **MAX30102** — used for **initial bring-up** (red + IR LEDs, one photodiode). This is the part in hand.
-- **MAX30101** — the **planned** sensor (arriving shortly). Register-compatible sibling at the same `0x57` address, but it **adds a green LED** — the wavelength commercial wrist trackers use because it's far less motion-sensitive at the wrist — while keeping red + IR for SpO2. Coming on the TinyCircuits **AST1041** Pulse-Oximetry Wireling (see [`datasheets/`](../datasheets/)).
+- **MAX30101** — the **planned** sensor (arriving shortly). Register-compatible sibling at the same `0x57` address, but it **adds a green LED** — the wavelength commercial wrist trackers use because it's far less motion-sensitive at the wrist — while keeping red + IR for SpO2. Coming on the TinyCircuits **AST1041** Pulse-Oximetry Wireling (see [`datasheets/`](datasheets/)).
 
-Because they're register-compatible, one driver covers both; the transition is a hardware swap, not a firmware rewrite. Sensor upgrade options beyond the MAX3010x (MAXM86161, MAX86141) are catalogued in [`datasheets/`](../datasheets/).
+Because they're register-compatible, one driver covers both; the transition is a hardware swap, not a firmware rewrite. Sensor upgrade options beyond the MAX3010x (MAXM86161, MAX86141) are catalogued in [`datasheets/`](datasheets/).
 
 ```
 MAX3010x breakout / AST1041 Wireling   ESP32-S3-Touch-AMOLED-1.8 pads
@@ -71,7 +71,7 @@ MAX3010x breakout / AST1041 Wireling   ESP32-S3-Touch-AMOLED-1.8 pads
 
 I2C address map (confirmed by on-board scan, Phase 0): ES8311 `0x18`, **TCA9554 `0x20`** (IO-expander, drives LCD/touch reset), AXP2101 `0x34`, FT3168 `0x38`, PCF85063 `0x51`, MAX3010x `0x57`, QMI8658 `0x6B` (SA0 high on this board).
 
-Wiring the INT line is strongly recommended: the MAX3010x has a 32-sample FIFO, and an interrupt-driven driver lets the CPU stay in light sleep between FIFO drains instead of polling. **On the AST1041 Wireling, confirm the 5-pin connector actually exposes INT** — if not, poll or solder to the chip's INT pad (noted in `datasheets/`).
+The current driver **polls** the 32-sample FIFO (the INT line is unused on this board). Wiring INT is a future power optimization — it would let the CPU stay in light sleep between FIFO drains — but it is not required and is not wired today. **On the AST1041 Wireling, confirm whether the 5-pin connector even exposes INT** before pursuing it; if not, it means soldering to the chip's INT pad (noted in `datasheets/`).
 
 **Mechanical:** the sensor must sit flush and snug against the top of the wrist (elastic strap, light pressure, no gap — motion artifact and ambient light leakage are the #1 cause of bad PPG). Enclosure/strap design is tracked as its own work item in Phase 0.
 
@@ -114,18 +114,21 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
 
 ## 3. Firmware Stack
 
-- **Framework: ESP-IDF 5.x** (not Arduino). We need fine-grained power management (light-sleep with I2C/GPIO wake), the I2S driver for the ES8311, native USB (mass-storage offload / CDC streaming), and FreeRTOS dual-core task control. Waveshare publishes ESP-IDF examples for this exact board that we can lift drivers from.
+- **Framework: ESP-IDF** (not Arduino) — built and run on **v6.0.2** (native, GCC 15.2) and **5.4.1** (PlatformIO `espressif32@6.11.0`, GCC 14.2); needs ≥5.3 for the managed Waveshare BSP. We need fine-grained power management (light-sleep with I2C/GPIO wake), the I2S driver for the ES8311, native USB (mass-storage offload / CDC streaming), and FreeRTOS dual-core task control. Waveshare publishes ESP-IDF examples for this exact board that we can lift drivers from.
 - **Threading:** pin sensor acquisition (MAX3010x + QMI8658) to one core and UI/SD-logging to the other, so an LVGL redraw or a slow SD flush never drops samples — a concrete payoff of the dual-core S3.
 - **UI: LVGL 9** with the `esp_lcd` **CO5300** QSPI driver (via the managed Waveshare BSP); full frame buffer in PSRAM (partial buffers only on the C6 fallback).
 - **Components** (each its own ESP-IDF component under `components/`):
   - `board/` — board seam: **delegates** to Waveshare's managed BSP (`waveshare/esp32_s3_touch_amoled_1_8`) for display/touch/SD/PMU/expander bring-up, and re-exports a small `board_*` API. **All board-specific code is confined here** so an S3→C6 swap stays local. (Renamed from `bsp/` to cede the `bsp_` namespace to the vendor BSP.)
-  - `max30102/` — MAX3010x PPG driver (MAX30102/30101, register-compatible): FIFO-interrupt driver, LED-current control, shutdown/wake.
+  - `max30102/` — MAX3010x PPG driver (MAX30102/30101, register-compatible): polled FIFO drain (32-deep; INT line unused on this board), configurable sample rate (50/100/200/400 Hz), LED-current control, shutdown/duty-cycle.
   - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
   - `actigraphy/` — QMI8658 (wrist) driver config + per-epoch activity counts (band-passed accel magnitude). Wrist movement only; body position comes from `bodynet`.
-  - `bodynet/` — **BLE central** managing 1..N WT9011DCL body sensors (+ the H10 reference): pairing/bonding, per-sensor role/placement, angle→sleep-position classification, per-sensor movement. Shares the BLE-central plumbing the H10 `refmon` uses.
-  - `sleep_core/` — epoch assembler, storage writer, sleep-scoring algorithm, night session state machine.
-  - `ui/` — LVGL screens (incl. a sensor-pairing/management screen).
-  - `sync/` — BLE GATT service + MQTT to Home Assistant (stretch).
+  - `bodynet/` — **BLE central** for 1..N WT9011DCL body sensors (+ the H10 reference): pairing/bonding, per-sensor role/placement, angle→sleep-position classification, per-sensor movement. *(Stub — Phase 2.5; the CSV's body-position/movement columns are present but 0 until this lands.)*
+  - `sleep_core/` — epoch assembler + night session state machine + opportunistic per-epoch RMSSD. **On-device sleep scoring is `TODO(phase3)`** — the algorithm currently lives offline in `tools/`. The CSV writer is a separate `sd_logger` component.
+  - `sd_logger/` — crash-safe 14-column CSV epoch logger (fsync-per-epoch, torn-tail tolerant, card-pull remount/resume); implements the `sleep_core` persistence vtable.
+  - `power/` — ACTIVE vs TRACKING power profiles (DFS + automatic tickless light-sleep via `esp_pm_configure`).
+  - `rtc/` · `pmu/` — hand-rolled register-level PCF85063A and AXP2101 drivers.
+  - `ui/` — LVGL 11-tile watch UI (incl. a live-vitals tile and a dev-only PPG-debug tile).
+  - `sync/` — BLE GATT service + MQTT to Home Assistant (stretch). *(Stub — Phase 5.)*
 
 ### 3.1 Data flow
 
@@ -139,7 +142,7 @@ PCF85063 ───────────────────► timestamps
                                                                   full-night re-pass in the morning)
 ```
 
-**Epoch record (~24 bytes):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI, beat-acceptance %, battery %, flags. A full night is ~1000 epochs ≈ 24 KB — trivial for SD, and even the 16 MB flash could hold months as a fallback. (Raw per-sensor streams, when logged, go to separate SD files keyed by sensor role.)
+**Epoch record (one 14-column CSV row):** timestamp, wrist activity count, **body position (back/left/right/belly)**, **body-movement count**, mean/min/max HR, RMSSD, SpO2, SQI-proxy, beat-acceptance %, battery %, flags. A full night is ~1000 rows ≈ tens of KB — trivial for SD. The schema is defined once in [`tools/sleeplog.py`](tools/sleeplog.py) (mirroring `sd_logger.c`); the body position/movement columns are present but 0 until Phase 2.5. *(Full-rate raw PPG currently streams over USB for offline tuning rather than to SD; raw-to-SD logging is a design goal, not yet built.)*
 
 ### 3.2 Sleep scoring approach
 
@@ -167,11 +170,11 @@ HRV is a **nice-to-have, not a requirement** — we enable it only when the meas
 ## 4. Device States & UX
 
 ```
-        tap / button                      user taps "Start sleep" (or auto-detect)
+        tap / button                      tap Start (on-screen button; auto-detect later)
 IDLE  ────────────────►  WATCH FACE  ───────────────────────────►  TRACKING
-(display off,             (time, battery,                          (display off, sensors duty-cycling,
- tap-to-wake armed)        last night's score)                      tap-to-wake shows minimal clock)
-                                ▲                                        │ wake detected / user stops / alarm
+(display off,             (time, battery,                          (panel off, sensors duty-cycling,
+ tap-to-wake armed)        last night's score)                      double-tap wakes to the Stop button)
+                                ▲                                        │ tap Stop / alarm
                                 └──────────  MORNING REPORT  ◄───────────┘
                                              (score, hypnogram, HR/SpO2 charts)
 ```
@@ -198,8 +201,8 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 
 ### Phase 0 — Bring-up & skeleton (foundation)
 **Goal:** get the board alive and wearable — pixels on screen, every device answering, running on battery.
-- [ ] Repo scaffolding: ESP-IDF project, CI build (GitHub Actions with `espressif/idf` container), `sdkconfig.defaults`.
-- [ ] Port Waveshare BSP: display + touch + LVGL "hello world"; verify PMU, RTC, IMU over I2C, and detect the microSD card over SPI (FAT mount + crash-safe writer come in Phase 2).
+- [x] Repo scaffolding: ESP-IDF project + `sdkconfig.defaults`. *(A CI build via GitHub Actions is still unbuilt.)*
+- [x] Port Waveshare BSP: display + touch + LVGL up; PMU, RTC, IMU verified over I2C, microSD detected (FAT mount + crash-safe writer landed in Phase 2).
 - [x] Wire the MAX3010x PPG sensor (MAX30102 first, then MAX30101 — same `0x57` address) to the I2C pads; confirm it ACKs alongside the onboard devices.
 - [ ] First-pass strap/enclosure so the unit can actually be worn (even if crude).
 - **Exit criteria:** board boots into an LVGL screen, all I2C devices enumerate, battery charges and runs untethered.
@@ -207,9 +210,9 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 ### Phase 1 — Sensor drivers
 **Goal:** turn the raw sensors into trustworthy live vitals and a per-beat IBI series.
 - **Before building, run the de-risking spikes** in [VALIDATION.md](VALIDATION.md) §1 (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is feasible on your wrist — it does **not** gate this phase; a poor S1 just means HRV is deferred or dropped while HR/SpO2/movement proceed.
-- [x] MAX3010x driver: FIFO + INT, configurable sample rate/LED current, shutdown mode.
-- [x] PPG pipeline: filtering, beat detection → live HR on screen; SpO2 ratio-of-ratios; SQI.
-- [ ] QMI8658 in low-power accel mode + activity counts; wake-on-motion interrupt.
+- [x] MAX3010x driver: polled FIFO (INT unused on this board), configurable sample rate (50/100/200/400 Hz) / LED current, shutdown/duty-cycle mode.
+- [x] PPG pipeline: despike + band-pass filtering, adaptive-threshold beat detection → live HR; SpO2 ratio-of-ratios; **real composite SQI** + a live rolling-window RMSSD.
+- [x] QMI8658 low-power accel mode + activity counts. *(Wake-on-motion interrupt dropped — the QMI8658 INT is not routed on this board; TRACKING uses timer-wake.)*
 - [x] RTC set/read; battery gauge via AXP2101.
 - [ ] (Optional, if pursuing HRV) Sub-sample peak interpolation → per-beat IBI series with timing error < 5 ms; IBI artifact/ectopic classifier + beat-acceptance %. (Basic beat detection for HR is already covered above; this is the HRV-grade precision.)
 - [ ] (Optional, if pursuing HRV) Dev-only `refmon` component: subscribe to the Polar H10 RR intervals over BLE and show them next to the wrist RMSSD, timestamped by one device clock (VALIDATION.md §3) — a live reference for tuning HRV. It also stands up the BLE-central plumbing that `bodynet` reuses in Phase 2.5.
@@ -218,10 +221,10 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 ### Phase 2 — Recording pipeline
 **Goal:** record a full night to microSD on battery (with an optional, power-permitting nightly HRV capture mode).
 - [x] Epoch assembler + SD writer (append-only CSV, crash-safe: fsync-per-epoch, torn-tail-tolerant; `events.log` flight recorder; card-pull remount+resume). *Run on hardware: the SD card mounts, a session opens the log file, and continuous 30 s epochs are written to the card — bench-validated over USB (correct t_unix grid, populated activity/flags).*
-- [x] Night session state machine (manual start/stop). **Trigger = VBUS**: unplug from charger ⇒ start, plug in ⇒ stop (debounced). A `sleep_core_request_start/stop()` seam is left for a future UI button; auto-detect later.
-- [x] Power work: display off + LVGL-port stop + UI-task gate during a distinct TRACKING mode, automatic tickless light-sleep armed (`esp_pm_configure`), MAX30102 duty-cycled (45 s PPG window / 5 min). **Wake-on-motion dropped** — the QMI8658 INT is not routed on this board; timer-wake only. *Light-sleep confirmed to engage in TRACKING on hardware (the USB console goes dark during sleep windows). Overnight drain still UNMEASURED (spike S4) — needs a Li-Po on the header first.*
+- [x] Night session state machine (manual start/stop). **Trigger = on-screen Start/Stop button** (Tracking tile toggle + a watch-face shortcut), wired to `sleep_core_request_start/stop()`; auto-detect later.
+- [x] Power work: panel blanked + redundant UI-task gated during a distinct TRACKING mode, MAX30102 duty-cycled (45 s PPG window / 5 min). **LVGL/touch are kept live in TRACKING** so the on-screen Stop button stays reachable — so the CPU stays at the ACTIVE profile (full speed, no light sleep): dropping into DFS/automatic light-sleep glitched the still-live QSPI panel back on mid-session. Deep CPU light-sleep needs a hardware wake source to coexist with an on-screen button and is deferred; the panel-off is the real TRACKING saving. **Wake-on-motion dropped** — the QMI8658 INT is not routed on this board; timer-wake only. *Overnight drain still UNMEASURED (spike S4) — needs a Li-Po on the header first.*
 - [ ] (Optional, power-permitting) Nightly HRV mode: capture longer continuous clean windows (~5 min/sleep cycle) for stable RMSSD instead of short duty-cycle bursts, and log the accepted-IBI series to SD. *Scaffolded as a separate binary side-file; default off.* Enable only if the measured overnight drain leaves room.
-- **Exit criteria:** device records a full 8-hour night on battery and the log opens cleanly in a notebook/spreadsheet. *The "opens cleanly" half is met (`tools/read_night.py`), and the **flash + microSD bench run is done** — epochs write to the card on hardware and light-sleep engages. The "8 h on battery" half still needs: a **Li-Po on the header** (gauge reads 0% — likely no cell attached), then an overnight run + spikes S3/S4 (SD throughput + overnight mAh via an external coulomb counter).*
+- **Exit criteria:** device records a full 8-hour night on battery and the log opens cleanly in a notebook/spreadsheet. *The "opens cleanly" half is met (`tools/read_night.py`), and the **flash + microSD bench run is done** — a session started from the on-screen button writes continuous 30 s epochs to the card on hardware. The "8 h on battery" half still needs: a **Li-Po on the header** (gauge reads 0% — likely no cell attached), then an overnight run + spikes S3/S4 (SD throughput + overnight mAh via an external coulomb counter). Overnight power now also depends on the deferred deep-sleep path (LVGL is kept live for the on-screen Stop button — see the Power-work note above).*
 
 ### Phase 2.5 — Body-sensor network (WT9011DCL over BLE)
 **Goal:** pair external BLE body sensors to get authoritative sleep position (back/left/right/belly).
@@ -268,7 +271,7 @@ Engineering techniques to apply as the relevant components are built — most im
 - **Template-matching beat detection.** Cross-correlate each pulse against a per-user beat template for a stable fiducial point — more robust timing than a raw peak, which directly helps RMSSD (VALIDATION.md §2).
 - **Double-buffered DMA SD writes from PSRAM.** Ping-pong ring buffers so sample acquisition never blocks on an SD flush (de-risked by spike S3).
 - **On-the-fly raw compression** (delta + RLE / simple predictive) to shrink the raw-PPG log without losing fidelity, if S3 shows SD volume/throughput is tight.
-- **Offload motion to the QMI8658.** Use its hardware FIFO, pedometer, and wake-on-motion engine so the MCU stays asleep between events instead of polling.
+- **Offload motion to the QMI8658.** Its hardware FIFO / pedometer / wake-on-motion engine could let the MCU sleep between events instead of polling — but **wake-on-motion is unavailable on this board** (the QMI8658 INT line is not routed); the driver currently polls and TRACKING uses timer-wake.
 - **Compute-on-wake batching.** Keep heavy work (full-night re-scoring, radio sync) off during the night; do it in the morning on wake to protect the overnight power budget.
 - **RTC-stamped event log** for every mode/state transition — cheap, and invaluable when debugging why a night looks wrong.
 
@@ -292,9 +295,9 @@ Engineering techniques to apply as the relevant components are built — most im
 | WT9011DCL BLE UUIDs/frame details vary by firmware | Confirm service/char UUIDs + `0x61` framing against the WitMotion datasheet during Phase 2.5 bring-up |
 
 Open questions to settle as we implement (defaults chosen so work can start):
-1. **Session start:** manual "Start sleep" button for v1; auto-detection later. 
-2. **Log format:** binary records + a tiny converter script (CSV is fine too if we prefer eyeballing files).
-3. **Strap/enclosure:** 3D-printed case with sensor window vs. sewing the breakout into a strap pocket.
+1. **Session start:** *decided — on-screen Start/Stop button* (a Tracking-tile toggle + a watch-face shortcut, wired to `sleep_core_request_start/stop()`); auto-detection later.
+2. **Log format:** *decided — crash-safe 14-column CSV* (append-only, fsync-per-epoch, torn-tail tolerant); schema in `tools/sleeplog.py`, reader `tools/read_night.py`.
+3. **Strap/enclosure:** 3D-printed case with sensor window vs. sewing the breakout into a strap pocket. *(Still open.)*
 4. **Body-sensor count/placement:** default is a single torso sensor for position; limb sensors (limb-movement detection) are an opt-in extension. How many to support as a hard cap?
 
 ---
@@ -304,28 +307,40 @@ Open questions to settle as we implement (defaults chosen so work can start):
 ```
 Sleep-Tracker/
 ├── PLAN.md                  # this document
+├── README.md                # entry point + doc map
 ├── FEATURES.md              # prioritized feature list
 ├── INTEGRATION.md           # Home Assistant + CPAP design
-├── firmware/                # ESP-IDF project (SCAFFOLDED — see firmware/README.md)
+├── VALIDATION.md            # de-risking spikes S1–S5
+├── CLAUDE.md                # repo working conventions
+├── datasheets/              # part datasheets + I²C bus map
+├── firmware/                # ESP-IDF project — boots + runs on hardware (see firmware/README.md)
 │   ├── CMakeLists.txt
+│   ├── platformio.ini       # espressif32@6.11.0 (IDF 5.4.1) — do not bump to 7.0.x
 │   ├── sdkconfig.defaults   # esp32s3 + octal PSRAM + 16 MB flash + custom partitions + PM
 │   ├── partitions.csv
-│   ├── main/                # app_main: dual-core task setup (sense | UI)
+│   ├── main/                # app_main: dual-core task setup (sense | UI); button-driven start/stop
 │   └── components/
 │       ├── board/           # board seam → delegates to managed Waveshare BSP (only board-specific code)
-│       ├── max30102/  ppg/  actigraphy/   # sensing + PPG/HRV pipeline
-│       ├── bodynet/         # BLE central: WT9011DCL body sensors + H10
-│       ├── sleep_core/      # epoch record, session SM, HRV, scoring
-│       └── ui/  sync/       # LVGL screens; BLE/MQTT → HA + CPAP
-├── hardware/                # wiring diagrams, strap/enclosure files (TODO)
-├── tools/                   # Python log analysis / algorithm tuning (TODO)
-└── docs/                    # per-subsystem notes as they solidify (TODO)
+│       ├── max30102/  ppg/  actigraphy/   # sensing + PPG pipeline (HR/SpO2/SQI/live RMSSD)
+│       ├── rtc/  pmu/        # PCF85063A + AXP2101 register-level drivers
+│       ├── sleep_core/      # epoch assembler + session SM + per-epoch RMSSD (on-device scoring = TODO phase3)
+│       ├── sd_logger/       # crash-safe 14-column CSV epoch logger
+│       ├── power/           # ACTIVE vs TRACKING profiles (DFS + tickless light-sleep)
+│       ├── bodynet/         # BLE central: WT9011DCL body sensors + H10  — STUB (Phase 2.5)
+│       └── ui/  sync/       # LVGL 11-tile watch UI; sync (BLE/MQTT → HA + CPAP) — STUB (Phase 5)
+├── tools/                   # Python: sleeplog, read_night, gen_synthetic_night, score_night, capture_ppg, analyze_ppg
+├── docs/                    # watch-ui-mockup.html + per-subsystem notes
+└── hardware/                # wiring diagrams, strap/enclosure files (planned — not yet created)
 ```
 
-**Status (Phases 0–1 done; Phase 2 recording bench-validated on hardware):** the firmware boots on real hardware — dual-core task architecture running, all onboard I2C devices enumerate (`0x18/0x20/0x34/0x51/0x6B`, plus the FT3168 touch at `0x38` once its reset is released), the CO5300 AMOLED + LVGL come up, and **touch works** (verified with an on-screen tap counter). Board bring-up is delegated to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets on the TCA9554 (a gap in the vendor BSP). The **RTC (PCF85063), IMU accel (QMI8658), and battery (AXP2101)** now read live over I2C — verified on a diagnostic screen (clock ticking, ~1 g at rest, ~4.1 V / charging) — via hand-rolled register-level drivers (`components/rtc`, `components/pmu`, `components/actigraphy`), originally because the managed chip components required IDF ≥5.5 (the project has since moved to **ESP-IDF v6.0.2**, on which the firmware builds, flashes, and runs unchanged). The PPG driver and first-pass PPG/DSP pipeline now run live on hardware (live HR + SpO2 via the external MAX30102 at `0x57`); only the epoch-assembler and scoring bodies remain stubbed and tagged `TODO(phaseN)`.
+**Current status** (per-phase detail + exit gates in §5):
 
-**Phase 2 (recording) update:** the epoch assembler, night-session state machine (VBUS-triggered), crash-safe CSV SD logger (`components/sd_logger`), and the power/duty-cycle TRACKING mode (`components/power`) are now **written, compiling, and adversarially reviewed**, with an offline reader (`tools/read_night.py`). Wake-on-motion was dropped (QMI8658 INT unrouted; timer-wake instead). **Flashed and bench-validated on hardware (ESP-IDF v6.0.2):** all I2C devices enumerate, the SD card mounts, a session opens the log file, continuous 30 s epochs are written to the card, and light-sleep engages in TRACKING.
+- **Phases 0–1 — done and verified on hardware.** The board boots (dual-core: `sensor` on core 1, `ui` on core 0); all onboard I2C devices enumerate (ES8311 `0x18`, TCA9554 `0x20`, AXP2101 `0x34`, FT3168 `0x38`, PCF85063 `0x51`, QMI8658 `0x6B`) plus the external MAX30102 at `0x57`; the CO5300 AMOLED + LVGL come up and touch works. Board bring-up delegates to Waveshare's managed BSP via `components/board/`, which also releases the LCD/touch resets the vendor BSP leaves asserted (via the TCA9554). Hand-rolled register-level drivers (`rtc`, `pmu`, `actigraphy`, `max30102`) read live, and the PPG/DSP pipeline yields live HR (~81 bpm) + SpO2 (98–99%) plus a live rolling-window RMSSD. Builds and runs on ESP-IDF v6.0.2 (native) and 5.4.1 (PlatformIO).
+- **Phase 2 — recording bench-validated on hardware; exit gate partially met.** The epoch assembler + button-triggered session FSM (`sleep_core`), crash-safe CSV logger (`sd_logger`), and TRACKING power mode (`power`) are written, reviewed, and validated over USB: the SD card mounts, an on-screen **Start** opens the log, and continuous 30 s epochs write to the card. Raw PPG is also logged to SD during a recording — buffered in PSRAM and flushed one block per PPG window to `<ts>_ppg.bin` (few large sequential writes to spare SD wear; reader `tools/read_raw_ppg.py`) — verified on hardware (a 45 s window flushed one ~108 KB block). Still open: the **8 h-on-battery night** — needs a Li-Po on the header (the AXP2101 gauge reads 0%, flagged `BATT_INVALID`) plus spikes S3/S4, and the deferred deep-sleep path (LVGL is kept live in TRACKING for the on-screen Stop button, so full light-sleep needs a hardware wake source). Wake-on-motion was dropped (QMI8658 INT unrouted; timer-wake only).
+- **Phase 4 — watch UI shell running on hardware.** An 11-tile swipeable LVGL app (`components/ui`): watch · live vitals · tracking · score · hypnogram · heart & O2 · position · history · alarm · settings · PPG-debug, with display-sleep + double-tap-to-wake. Tracking is driven by an **on-screen Start/Stop button** (Tracking tile + a watch-face shortcut), and Settings carries a selectable **HR sample rate (50–800 Hz)**. The watch / live vitals / tracking / PPG-debug tiles show live sensor data; the score / hypnogram / heart & O2 / position / history tiles render a representative **sample** night pending on-device scoring + Phase 2.5 body sensors. Details in [firmware/README.md](firmware/README.md); interactive design reference: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
+- **Phase 3 (scoring) — offline prototype only.** The full pipeline lives in `tools/score_night.py` (validated on synthetic nights, ~98% sleep/wake, ~85–90% 4-stage); on-device scoring is a `TODO(phase3)` in `sleep_core.c`.
+- **Not started:** `bodynet` (Phase 2.5 body sensors) and `sync` (Phase 5) are stubs; the CSV's body-position/movement columns are always 0.
 
-**Phase 4 (watch UI) update:** the on-device UI is now an **11-tile swipeable LVGL app** (`components/ui`) running on hardware — watch face, live vitals (real HR / SpO2 / HRV / SQI + a live PPG pulse waveform), tracking clock, morning-report screens (score / hypnogram / heart & O2), position, history, alarm, a scrollable settings list, and a **PPG-debug tile** (the tuning graph, preserved) — plus display-sleep + double-tap-to-wake. The watch / live / tracking / debug tiles show live sensor data; the report / position / history tiles render a representative sample night pending on-device scoring + Phase 2.5 body sensors. Interactive design reference: [docs/watch-ui-mockup.html](docs/watch-ui-mockup.html).
+**Next steps:** (1) attach a Li-Po and run an overnight session + spikes S3/S4 to close the "8 h on battery" gate; (2) port the offline scorer into on-device `sleep_core` and wire the report/position/history tiles to real logs; (3) build out the Phase 2.5 body-sensor network.
 
 **Next steps:** (1) flash + microSD bench run — **done**: epochs write to the card on hardware and light-sleep engages; (2) attach a **Li-Po on the header** (gauge reads 0%), then run an overnight session + spikes S3/S4 (SD throughput + overnight mAh on an external coulomb counter) to close the "8 h on battery" exit gate; (3) Phase 2.5 body sensors / Phase 3 scoring (the offline scorer in `tools/` is ready to port on-device).

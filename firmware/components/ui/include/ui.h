@@ -37,6 +37,10 @@ void ui_update_waveform(void);
 // Pump the UI once per loop iteration (no-op: LVGL runs on the esp_lvgl_port task).
 void ui_tick(void);
 
+// User-selected PPG sample rate for ACTIVE/live mode, chosen on the Settings page
+// (one of 50/100/200/400/800 Hz; default 50). Read by the sensor task each loop.
+uint16_t ui_hr_rate_hz(void);
+
 // Manual display blank/unblank (LVGL + touch stay live so a double-tap wakes it).
 // Driven by the Settings "Sleep display" button + a double-tap-anywhere gesture,
 // but exposed so the app can force a known state (e.g. wake on returning to ACTIVE).

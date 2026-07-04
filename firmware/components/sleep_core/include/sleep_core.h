@@ -90,6 +90,11 @@ void sleep_core_request_stop(void);
 
 sleep_state_t sleep_core_state(void);
 
+// Current session-relative Unix time (t0 + esp_timer elapsed; survives light
+// sleep). Only meaningful while a session is open — used to timestamp raw-PPG
+// blocks. Sensor task (core 1).
+uint32_t sleep_core_now_unix(void);
+
 // --- Live sensor feeds (sensor task / core 1 only) -------------------------
 // No-ops unless a session is TRACKING. Accumulate into the open epoch.
 void sleep_core_feed_accel(float ax, float ay, float az);

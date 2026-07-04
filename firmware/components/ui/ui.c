@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "ppg.h"
 #include "board.h"
+#include "sleep_core.h"
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -71,6 +72,22 @@ static lv_chart_series_t *s_live_ser;
 static lv_obj_t *s_dbg_time, *s_dbg_imu, *s_dbg_hr, *s_dbg_hrv, *s_dbg_batt;
 static lv_obj_t *s_dbg_chart;
 static lv_chart_series_t *s_dbg_ser;
+
+// ---- start/stop-tracking controls -------------------------------------------
+static lv_obj_t *s_tileview;         // for jumping to the Tracking tile on Start
+static lv_obj_t *s_trk_dot;          // recording indicator dot
+static lv_obj_t *s_trk_status;       // "RECORDING" / "READY" label
+static lv_obj_t *s_trk_btn;          // the Start/Stop toggle on the Tracking tile
+static lv_obj_t *s_trk_btn_lbl;      // its label
+static bool      s_ui_tracking;      // UI's view of the session (flipped by the buttons)
+#define TILE_TRACKING 2              // index of the Tracking tile in the tileview
+
+// ---- HR sample-rate setting (Settings page; read cross-task by the sensor loop)
+static const uint16_t HR_RATE_OPTS[] = { 50, 100, 200, 400, 800 };
+#define HR_RATE_OPTS_N (sizeof HR_RATE_OPTS / sizeof HR_RATE_OPTS[0])
+static volatile uint16_t s_hr_rate_hz = 50;   // current selection (aligned u16 => atomic read)
+static uint8_t           s_hr_rate_idx;       // index into HR_RATE_OPTS (0 => 50 Hz)
+static lv_obj_t         *s_hr_rate_lbl;       // the settings button's value label
 
 // ---- display-sleep / double-tap-wake ----------------------------------------
 static lv_obj_t *s_wake_layer;
@@ -170,6 +187,61 @@ static lv_obj_t *row(lv_obj_t *par, const char *title, const char *sub)
 }
 
 // ---------------------------------------------------------------------------
+// start/stop tracking — the on-screen replacement for the old VBUS trigger
+// ---------------------------------------------------------------------------
+// Reflect the session state on the Tracking tile (button label/color + the
+// RECORDING/READY indicator). Called under the LVGL lock (from a button cb).
+static void apply_tracking_ui(bool tracking)
+{
+    s_ui_tracking = tracking;
+    if (s_trk_btn_lbl) {
+        lv_label_set_text(s_trk_btn_lbl, tracking ? "Stop tracking" : "Start sleep tracking");
+    }
+    if (s_trk_btn) {
+        lv_obj_set_style_bg_color(s_trk_btn, lv_color_hex(tracking ? COL_CRIT : COL_ACCENT), 0);
+    }
+    if (s_trk_status) {
+        lv_label_set_text(s_trk_status, tracking ? "RECORDING" : "READY");
+        lv_obj_set_style_text_color(s_trk_status, lv_color_hex(tracking ? COL_CRIT : COL_INK3), 0);
+    }
+    if (s_trk_dot) {
+        lv_obj_set_style_bg_color(s_trk_dot, lv_color_hex(tracking ? COL_CRIT : COL_INK3), 0);
+    }
+}
+
+static void ui_start_tracking(void)
+{
+    sleep_core_request_start();          // sensor task opens the SD log + duty cycle
+    apply_tracking_ui(true);
+    if (s_tileview) {                    // land on the Tracking tile so a wake shows Stop
+        lv_tileview_set_tile_by_index(s_tileview, TILE_TRACKING, 0, LV_ANIM_OFF);
+    }
+    ui_display_sleep();                  // blank the panel; double-tap wakes to Stop
+}
+
+static void ui_stop_tracking(void)
+{
+    sleep_core_request_stop();           // sensor task closes the log + returns to ACTIVE
+    apply_tracking_ui(false);
+    ui_display_wake();                   // make sure the screen is on after stopping
+}
+
+// Watch-face shortcut: always starts (a duplicate start while tracking is a no-op
+// in sleep_core, so it's safe if the face is somehow reached mid-session).
+static void watch_start_cb(lv_event_t *e) { (void)e; ui_start_tracking(); }
+
+// Tracking-tile toggle: Start when idle, Stop when recording.
+static void trk_toggle_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_ui_tracking) {
+        ui_stop_tracking();
+    } else {
+        ui_start_tracking();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // tiles
 // ---------------------------------------------------------------------------
 static void build_watch(lv_obj_t *t)
@@ -200,8 +272,16 @@ static void build_watch(lv_obj_t *t)
     lv_obj_t *vit = lbl(t, "RHR 54     SpO2 96%", &lv_font_montserrat_14, COL_INK2);
     lv_obj_align(vit, LV_ALIGN_CENTER, 0, 96);
 
-    lv_obj_t *hint = lbl(t, "unplug to start sleep", &lv_font_montserrat_12, COL_INK3);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -26);
+    // Start-tracking shortcut (replaces the old "unplug to start" hint). Jumps to
+    // the Tracking tile and opens a session; Stop lives there.
+    lv_obj_t *sb = lv_button_create(t);
+    lv_obj_set_size(sb, 220, 46);
+    lv_obj_align(sb, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_set_style_bg_color(sb, lv_color_hex(COL_ACCENT), 0);
+    lv_obj_set_style_radius(sb, 23, 0);
+    lv_obj_add_event_cb(sb, watch_start_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *sbl = lbl(sb, "Start sleep tracking", &lv_font_montserrat_14, COL_INK);
+    lv_obj_center(sbl);
 }
 
 static void build_live(lv_obj_t *t)
@@ -265,14 +345,14 @@ static void build_tracking(lv_obj_t *t)
     lv_obj_align(rec, LV_ALIGN_TOP_MID, 0, 60);
     lv_obj_set_style_pad_column(rec, 8, 0);
     lv_obj_set_flex_align(rec, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *dot = lv_obj_create(rec);
-    no_scroll(dot);
-    lv_obj_set_size(dot, 10, 10);
-    lv_obj_set_style_radius(dot, 5, 0);
-    lv_obj_set_style_bg_color(dot, lv_color_hex(COL_CRIT), 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_t *rl = lbl(rec, "RECORDING", &lv_font_montserrat_12, COL_CRIT);
-    lv_obj_set_style_text_letter_space(rl, 3, 0);
+    s_trk_dot = lv_obj_create(rec);
+    no_scroll(s_trk_dot);
+    lv_obj_set_size(s_trk_dot, 10, 10);
+    lv_obj_set_style_radius(s_trk_dot, 5, 0);
+    lv_obj_set_style_bg_color(s_trk_dot, lv_color_hex(COL_INK3), 0);
+    lv_obj_set_style_border_width(s_trk_dot, 0, 0);
+    s_trk_status = lbl(rec, "READY", &lv_font_montserrat_12, COL_INK3);
+    lv_obj_set_style_text_letter_space(s_trk_status, 3, 0);
 
     s_trk_time = lbl(t, "--:--", &lv_font_montserrat_48, COL_INK);
     lv_obj_align(s_trk_time, LV_ALIGN_TOP_MID, 0, 108);
@@ -297,7 +377,17 @@ static void build_tracking(lv_obj_t *t)
         if (i == 1) s_trk_hr = vl;
     }
 
-    lv_obj_t *hint = lbl(t, "screen off saves power  •  double-tap to wake", &lv_font_montserrat_12, COL_INK3);
+    // Start/Stop toggle — the on-screen session control. Full-width, touch-sized.
+    s_trk_btn = lv_button_create(t);
+    lv_obj_set_size(s_trk_btn, 260, 54);
+    lv_obj_align(s_trk_btn, LV_ALIGN_BOTTOM_MID, 0, -58);
+    lv_obj_set_style_bg_color(s_trk_btn, lv_color_hex(COL_ACCENT), 0);
+    lv_obj_set_style_radius(s_trk_btn, 16, 0);
+    lv_obj_add_event_cb(s_trk_btn, trk_toggle_cb, LV_EVENT_CLICKED, NULL);
+    s_trk_btn_lbl = lbl(s_trk_btn, "Start sleep tracking", &lv_font_montserrat_20, COL_INK);
+    lv_obj_center(s_trk_btn_lbl);
+
+    lv_obj_t *hint = lbl(t, "recording blanks the screen  •  double-tap to wake", &lv_font_montserrat_12, COL_INK3);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -26);
 }
 
@@ -609,6 +699,22 @@ static void build_alarm(lv_obj_t *t)
 
 static void sleep_now_cb(lv_event_t *e) { (void)e; ui_display_sleep(); }
 
+// Tap the HR-rate pill to advance 50 -> 100 -> 200 -> 400 -> 800 -> 50 Hz. The
+// sensor task reads s_hr_rate_hz each loop and re-applies the rate, so the change
+// takes effect live (within one poll).
+static void hr_rate_cb(lv_event_t *e)
+{
+    (void)e;
+    s_hr_rate_idx = (uint8_t)((s_hr_rate_idx + 1) % HR_RATE_OPTS_N);
+    s_hr_rate_hz  = HR_RATE_OPTS[s_hr_rate_idx];
+    if (s_hr_rate_lbl) {
+        char b[12];
+        snprintf(b, sizeof b, "%u Hz", (unsigned)s_hr_rate_hz);
+        lv_label_set_text(s_hr_rate_lbl, b);
+    }
+    ESP_LOGI(TAG, "HR sample rate -> %u Hz", (unsigned)s_hr_rate_hz);
+}
+
 // right-hand value label for a settings row
 static void row_val(lv_obj_t *r, const char *v, uint32_t c)
 {
@@ -650,10 +756,24 @@ static void build_settings(lv_obj_t *t)
     lv_obj_set_style_bg_color(sl, lv_color_white(), LV_PART_KNOB);
     lv_obj_set_style_pad_all(sl, 9, LV_PART_KNOB);   // ~30 px knob for the finger
 
+    // HR sample rate — a touch-sized pill that cycles 50/100/200/400/800 Hz on tap;
+    // read live by the sensor task (ui_hr_rate_hz).
+    lv_obj_t *hrr = row(list, "HR sample rate", "live PPG rate • tap to change");
+    lv_obj_t *hrb = lv_button_create(hrr);
+    lv_obj_set_style_bg_color(hrb, lv_color_hex(COL_SURF2), 0);
+    lv_obj_set_style_radius(hrb, 12, 0);
+    lv_obj_set_style_pad_hor(hrb, 18, 0);
+    lv_obj_set_style_pad_ver(hrb, 9, 0);
+    lv_obj_add_event_cb(hrb, hr_rate_cb, LV_EVENT_CLICKED, NULL);
+    char hrbuf[12];
+    snprintf(hrbuf, sizeof hrbuf, "%u Hz", (unsigned)s_hr_rate_hz);
+    s_hr_rate_lbl = lbl(hrb, hrbuf, &lv_font_montserrat_14, COL_ACCENT);
+    lv_obj_center(s_hr_rate_lbl);
+
     row_val(row(list, "Display timeout", "auto-blank after inactivity"), "30 s", COL_INK);
     toggle(row(list, "Dim night clock", "faint clock on tap while tracking"), true);
-    row_val(row(list, "Start / stop mode", "unplug from charger = track"), "VBUS", COL_INK);
-    toggle(row(list, "Auto sleep detect", "start a night without unplugging"), false);
+    row_val(row(list, "Start / stop mode", "on-screen Start / Stop button"), "Button", COL_INK);
+    toggle(row(list, "Auto sleep detect", "start a night automatically"), false);
     toggle(row(list, "Double-tap to wake", "blank screen, 2 taps to light it"), true);
     toggle(row(list, "HRV capture", "longer clean windows (uses power)"), false);
     toggle(row(list, "Do not disturb", "silence alarms and tones"), true);
@@ -754,6 +874,7 @@ esp_err_t ui_init(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_t *tv = lv_tileview_create(scr);
+    s_tileview = tv;                     // retained so Start can jump to the Tracking tile
     lv_obj_set_style_bg_color(tv, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(tv, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(tv, LV_SCROLLBAR_MODE_OFF);
@@ -947,4 +1068,9 @@ bool ui_display_is_asleep(void)
 void ui_tick(void)
 {
     // No-op: LVGL is driven by the esp_lvgl_port task started in the BSP.
+}
+
+uint16_t ui_hr_rate_hz(void)
+{
+    return s_hr_rate_hz;
 }
