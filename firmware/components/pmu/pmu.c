@@ -49,15 +49,19 @@ esp_err_t pmu_read(pmu_status_t *out)
     if (out == NULL || s_dev == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    // Fail the whole read if ANY register NAKs (plausible on the shared bus):
+    // returning ESP_OK with a byte left at its pre-zeroed value would report a
+    // fabricated 0% / 0 mV as if it were a genuine reading (0 <= 100 passes the
+    // batt_pct guard below, so it looks like a real dead battery, not "unknown"),
+    // corrupting both the live UI and the epoch CSV's batt_pct/vbat_mv columns.
+    // Callers treat a non-ESP_OK return as "no update", so bailing here is safe.
     uint8_t s1 = 0, s2 = 0, pct = 0, vh = 0, vl = 0;
-    esp_err_t err = rd(AXP2101_REG_STATUS1, &s1);
-    if (err != ESP_OK) {
-        return err;
-    }
-    rd(AXP2101_REG_STATUS2, &s2);
-    rd(AXP2101_REG_BAT_PERCENT, &pct);
-    rd(AXP2101_REG_VBAT_H, &vh);
-    rd(AXP2101_REG_VBAT_L, &vl);
+    esp_err_t err;
+    if ((err = rd(AXP2101_REG_STATUS1, &s1))      != ESP_OK) return err;
+    if ((err = rd(AXP2101_REG_STATUS2, &s2))      != ESP_OK) return err;
+    if ((err = rd(AXP2101_REG_BAT_PERCENT, &pct)) != ESP_OK) return err;
+    if ((err = rd(AXP2101_REG_VBAT_H, &vh))       != ESP_OK) return err;
+    if ((err = rd(AXP2101_REG_VBAT_L, &vl))       != ESP_OK) return err;
 
     out->vbus_present = (s1 & 0x20) != 0;                  // STATUS1 bit5
     out->charging     = ((s2 >> 5) & 0x03) == 0x01;        // STATUS2 [6:5] == 01

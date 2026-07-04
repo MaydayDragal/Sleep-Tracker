@@ -203,7 +203,7 @@ def summarize(df, asleep, stages, baseline):
 
     # Position breakdown over asleep epochs (+ position-segmented HR / SpO2).
     pos_min, pos_hr, pos_spo2 = {}, {}, {}
-    positions = [int(p) for p in df["body_position"].astype(int)]
+    positions = [int(p) if p == p else 0 for p in df["body_position"].astype("float")]
     spo2_col = [float(v) if v == v else None for v in df["spo2_pct"].astype("float")]
     for i in asleep_idx:
         p = positions[i]

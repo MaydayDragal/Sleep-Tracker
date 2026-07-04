@@ -86,7 +86,7 @@ Brainstormed feature set for the wrist-worn sleep tracker (ESP32-S3-Touch-AMOLED
 ## 7. Data, Storage & Sync
 
 - **[P0] Crash-safe epoch logging to microSD** — append-only records; a power loss never corrupts a night
-- **[P1] Raw waveform logging** — full-rate PPG + accel to SD so every night is re-analyzable forever (the S3's PSRAM makes this feasible). *Design goal — today raw PPG streams over USB (`PPG_RAW_STREAM` → `tools/capture_ppg.py`) and the SD log holds per-epoch summaries, not raw waveforms.*
+- **[P1] Raw waveform logging** — full-rate PPG + accel to SD so every night is re-analyzable forever (the S3's PSRAM makes this feasible). *Raw PPG → SD is built: one PSRAM-buffered block per PPG window is flushed to `<ts>_ppg.bin` each recording (reader `tools/read_raw_ppg.py`), and it still streams over USB (`PPG_RAW_STREAM` → `tools/capture_ppg.py`) in ACTIVE mode. Raw accel → SD is the remaining part of the goal.*
 - **[P0] Offline analysis toolkit** — Python scripts to plot nights, tune the scorer, and validate against reference devices
 - **[P1] USB mass-storage offload** — plug into a PC, SD card appears as a drive
 - **[P1] Live USB streaming mode** — raw PPG/accel over USB CDC for algorithm development

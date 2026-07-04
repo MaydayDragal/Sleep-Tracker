@@ -74,6 +74,8 @@ static struct {
     // current sample rate + fs-derived coefficients (set in set_coeffs)
     float    fs;
     float    a_lp, a_dc, a_thr, a_pkdecay;
+    float    finger_min, dc_step;   // contact / fast-baseline-step thresholds,
+                                    // scaled to the raw-count magnitude at fs
     int      wave_decim, wave_dcount;
     int32_t  wave[PPG_WAVE_N];      // band-passed waveform ring (on-device graph)
     uint32_t wave_head;             // total decimated samples written
@@ -125,6 +127,18 @@ static void set_coeffs(float fs)
     S.a_pkdecay = expf(-1.0f / (fs * 10.0f)); // ~10 s peak-amp decay
     S.wave_decim = (int)(fs / WAVE_TARGET_HZ + 0.5f);
     if (S.wave_decim < 1) S.wave_decim = 1;
+
+    // The MAX30102 raw-count magnitude for a fixed photocurrent tracks the ADC bit
+    // depth, which max30102.c's spo2_config() drops as the rate rises (18-bit
+    // @<=100 Hz, 17-bit @200, 16-bit @400, 15-bit @800 — each dropped bit ~halves
+    // the count). Scale the absolute IR-count thresholds to match, so finger
+    // detection stays rate-independent instead of failing at 400/800 Hz.
+    const float sc = (fs <= 100.0f) ? 1.0f
+                   : (fs <= 200.0f) ? 0.5f
+                   : (fs <= 400.0f) ? 0.25f
+                                    : 0.125f;
+    S.finger_min = FINGER_IR_MIN * sc;
+    S.dc_step    = 5000.0f * sc;
 }
 
 void ppg_reset(void)
@@ -152,6 +166,13 @@ void ppg_set_rate(float fs)
     S.ibi_count = S.ibi_head = 0;     // fresh HRV window per high-rate burst
 }
 
+// Process a batch of `n` samples. Returns true if at least one beat was accepted
+// in the batch; `out_beat` (if non-NULL) receives only the MOST RECENT accepted
+// beat of the batch. Every accepted beat still feeds the internal HRV window, so
+// ppg.c's own RMSSD is complete — but a per-beat caller sees at most one beat per
+// call. This is exact for the drain cadence in use (>=200 Hz polled every ~40 ms
+// => <=1 beat per batch, well under the 0.35 s refractory); if the poll interval
+// ever grows enough for a batch to span two beats, add a caller-supplied array.
 bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_beat)
 {
     bool beat = false;
@@ -179,9 +200,9 @@ bool ppg_process(const max30102_sample_t *samples, size_t n, ppg_beat_t *out_bea
         // peak_amp.
         const float d_ir  = ir  - S.dc_ir;
         const float d_red = red - S.dc_red;
-        S.dc_ir  += (fabsf(d_ir)  > 5000.0f) ? d_ir  * 0.5f : d_ir  * S.a_dc;
-        S.dc_red += (fabsf(d_red) > 5000.0f) ? d_red * 0.5f : d_red * S.a_dc;
-        S.finger = S.dc_ir > FINGER_IR_MIN;
+        S.dc_ir  += (fabsf(d_ir)  > S.dc_step) ? d_ir  * 0.5f : d_ir  * S.a_dc;
+        S.dc_red += (fabsf(d_red) > S.dc_step) ? d_red * 0.5f : d_red * S.a_dc;
+        S.finger = S.dc_ir > S.finger_min;
 
         // On the finger-on edge, hold off beat detection while the baseline and
         // filters settle. peak_amp has decayed toward 0 during the finger-off

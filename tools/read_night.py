@@ -26,27 +26,16 @@ try:
 except ImportError:
     sys.exit("This tool needs pandas:  pip install pandas")
 
-# Must match enum in components/sleep_core/include/sleep_core.h
-FLAG_NAMES = [
-    (1 << 0, "WRIST_OFF"),
-    (1 << 1, "MOTION"),
-    (1 << 2, "DESAT"),
-    (1 << 3, "SENSOR_LOST"),
-    (1 << 4, "NO_PPG"),
-    (1 << 5, "NO_CARDIAC"),
-    (1 << 6, "RTC_UNSYNCED"),
-    (1 << 7, "SQI_PROXY"),
-    (1 << 8, "HRV_VALID"),
-    (1 << 9, "BATT_INVALID"),
-]
-NO_CARDIAC = 1 << 5
+# Schema constants (flag bits, cardiac columns) come from sleeplog — the single
+# source of truth that mirrors the firmware. Don't re-declare them here: a private
+# copy drifted from sleeplog in the past (it nulled `sqi` under NO_CARDIAC while
+# sleeplog did not), so both tools disagreed on the same log.
+import sleeplog as S
 
-# Columns that are meaningless when NO_CARDIAC is set (PPG was off / no signal).
-CARDIAC_COLS = ["hr_mean", "hr_min", "hr_max", "rmssd_ms", "spo2_pct", "sqi", "beat_accept"]
-
-
-def decode_flags(flags: int) -> str:
-    return "|".join(name for bit, name in FLAG_NAMES if flags & bit) or "-"
+FLAG_NAMES = S.FLAG_NAMES
+NO_CARDIAC = S.FLAG_NO_CARDIAC
+# Columns meaningless when NO_CARDIAC is set (PPG was off / no signal).
+CARDIAC_COLS = S.CARDIAC_COLS
 
 
 def naive_wall(t_unix: int) -> str:
@@ -99,7 +88,7 @@ def main() -> None:
         spo2 = cardiac["spo2_pct"].dropna()
         if not spo2.empty:
             print(f"SpO2        : mean {spo2.mean():.0f}  min {spo2.min():.0f} %")
-        hrv = cardiac.loc[(cardiac["flags"].astype(int) & (1 << 8)) != 0, "rmssd_ms"].dropna()
+        hrv = cardiac.loc[(cardiac["flags"].astype(int) & S.FLAG_HRV_VALID) != 0, "rmssd_ms"].dropna()
         if not hrv.empty:
             print(f"RMSSD       : {len(hrv)} valid epochs, mean {hrv.mean():.0f} ms")
 

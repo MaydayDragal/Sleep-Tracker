@@ -119,7 +119,7 @@ Pairing is persistent (bond + remembered MAC/role), so a configured sensor rejoi
 - **UI: LVGL 9** with the `esp_lcd` **CO5300** QSPI driver (via the managed Waveshare BSP); full frame buffer in PSRAM (partial buffers only on the C6 fallback).
 - **Components** (each its own ESP-IDF component under `components/`):
   - `board/` — board seam: **delegates** to Waveshare's managed BSP (`waveshare/esp32_s3_touch_amoled_1_8`) for display/touch/SD/PMU/expander bring-up, and re-exports a small `board_*` API. **All board-specific code is confined here** so an S3→C6 swap stays local. (Renamed from `bsp/` to cede the `bsp_` namespace to the vendor BSP.)
-  - `max30102/` — MAX3010x PPG driver (MAX30102/30101, register-compatible): polled FIFO drain (32-deep; INT line unused on this board), configurable sample rate (50/100/200/400 Hz), LED-current control, shutdown/duty-cycle.
+  - `max30102/` — MAX3010x PPG driver (MAX30102/30101, register-compatible): polled FIFO drain (32-deep; INT line unused on this board), configurable sample rate (50/100/200/400/800 Hz), LED-current control, shutdown/duty-cycle.
   - `ppg/` — signal processing: DC removal, band-pass, beat detection with sub-sample peak refinement → HR + inter-beat intervals (IBIs); IBI artifact/ectopic correction; ratio-of-ratios → SpO2; signal-quality index (SQI) to reject motion-corrupted windows.
   - `actigraphy/` — QMI8658 (wrist) driver config + per-epoch activity counts (band-passed accel magnitude). Wrist movement only; body position comes from `bodynet`.
   - `bodynet/` — **BLE central** for 1..N WT9011DCL body sensors (+ the H10 reference): pairing/bonding, per-sensor role/placement, angle→sleep-position classification, per-sensor movement. *(Stub — Phase 2.5; the CSV's body-position/movement columns are present but 0 until this lands.)*
@@ -210,7 +210,7 @@ Screens for v1: **watch face**, **tracking (minimal clock + "tracking" glyph)**,
 ### Phase 1 — Sensor drivers
 **Goal:** turn the raw sensors into trustworthy live vitals and a per-beat IBI series.
 - **Before building, run the de-risking spikes** in [VALIDATION.md](VALIDATION.md) §1 (power, SD throughput, sensor coupling). Spike **S1** checks whether the *optional* HRV feature is feasible on your wrist — it does **not** gate this phase; a poor S1 just means HRV is deferred or dropped while HR/SpO2/movement proceed.
-- [x] MAX3010x driver: polled FIFO (INT unused on this board), configurable sample rate (50/100/200/400 Hz) / LED current, shutdown/duty-cycle mode.
+- [x] MAX3010x driver: polled FIFO (INT unused on this board), configurable sample rate (50/100/200/400/800 Hz) / LED current, shutdown/duty-cycle mode.
 - [x] PPG pipeline: despike + band-pass filtering, adaptive-threshold beat detection → live HR; SpO2 ratio-of-ratios; **real composite SQI** + a live rolling-window RMSSD.
 - [x] QMI8658 low-power accel mode + activity counts. *(Wake-on-motion interrupt dropped — the QMI8658 INT is not routed on this board; TRACKING uses timer-wake.)*
 - [x] RTC set/read; battery gauge via AXP2101.
@@ -328,8 +328,8 @@ Sleep-Tracker/
 │       ├── power/           # ACTIVE vs TRACKING profiles (DFS + tickless light-sleep)
 │       ├── bodynet/         # BLE central: WT9011DCL body sensors + H10  — STUB (Phase 2.5)
 │       └── ui/  sync/       # LVGL 11-tile watch UI; sync (BLE/MQTT → HA + CPAP) — STUB (Phase 5)
-├── tools/                   # Python: sleeplog, read_night, gen_synthetic_night, score_night, capture_ppg, analyze_ppg
-├── docs/                    # watch-ui-mockup.html + per-subsystem notes
+├── tools/                   # Python: sleeplog, read_night, read_raw_ppg, gen_synthetic_night, score_night, capture_ppg, analyze_ppg
+├── docs/                    # watch-ui-mockup.html (versioned UI design reference)
 └── hardware/                # wiring diagrams, strap/enclosure files (planned — not yet created)
 ```
 

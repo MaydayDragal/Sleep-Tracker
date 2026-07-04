@@ -37,6 +37,7 @@ static bool     s_rtc_valid;
 static bool     s_session;       // a session is active (want an epoch file open)
 static uint32_t s_unset_count;   // disambiguates RTC-unset filenames
 static uint32_t s_reopen_count;  // disambiguates "_r" filenames on repeated pulls
+static uint32_t s_ppg_fs_hz;     // PPG rate for the events.log session marker (set by main)
 
 // Raw-PPG state (PSRAM buffer + current binary file + in-progress block).
 static uint8_t *s_raw_buf;       // PSRAM block buffer (NULL => raw logging disabled)
@@ -234,6 +235,11 @@ static bool open_epoch_file(bool resumed)
     return true;
 }
 
+void sd_logger_set_ppg_rate(uint32_t hz)
+{
+    s_ppg_fs_hz = hz;
+}
+
 // --- sleep_core_hooks_t vtable ---------------------------------------------
 
 static esp_err_t hk_open(uint32_t t_start_unix, bool rtc_valid)
@@ -247,8 +253,9 @@ static esp_err_t hk_open(uint32_t t_start_unix, bool rtc_valid)
     open_events();
     if (s_event_f) {
         fprintf(s_event_f,
-                "# session start t_unix=%lu rtc_valid=%d ppg_fs_hz=100 epoch_sec=%u tz_offset_min=0\n",
-                (unsigned long)t_start_unix, rtc_valid, (unsigned)SLEEP_EPOCH_SEC);
+                "# session start t_unix=%lu rtc_valid=%d ppg_fs_hz=%u epoch_sec=%u tz_offset_min=0\n",
+                (unsigned long)t_start_unix, rtc_valid, (unsigned)s_ppg_fs_hz,
+                (unsigned)SLEEP_EPOCH_SEC);
         fflush(s_event_f);
         fsync(fileno(s_event_f));
     }
