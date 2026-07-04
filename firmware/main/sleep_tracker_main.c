@@ -431,8 +431,11 @@ static void ppg_sweep_run(i2c_master_bus_handle_t bus)
             max30102_set_led_current(leds[li], leds[li], 0);
             max30102_set_smp_ave(aves[ai]);
             const uint16_t out = max30102_output_rate_hz();
-            ppg_set_rate((float)out);
+            // Reset FIRST (ppg_reset re-seeds fs to PPG_FS_DEFAULT), THEN set the
+            // real output rate — otherwise the pipeline runs at 400 Hz coeffs while
+            // averaged data arrives slower, doubling HR / collapsing SNR.
             ppg_reset();
+            ppg_set_rate((float)out);
 
             sweep_collect(SWEEP_SETTLE_MS, NULL);          // settle, discard
             sweep_acc_t a = {0};
