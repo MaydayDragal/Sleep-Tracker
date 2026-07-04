@@ -24,6 +24,11 @@ esp_err_t sd_logger_init(void);
 // True if an epoch file is currently open for writing.
 bool sd_logger_is_logging(void);
 
+// Tell the logger the PPG sample rate used during a recording, so the events.log
+// session-start marker records the real rate (`ppg_fs_hz=`) instead of a stale
+// literal. Call once at boot (and any time the tracking rate changes).
+void sd_logger_set_ppg_rate(uint32_t hz);
+
 // Raw-PPG capture (sensor task / core 1, during a TRACKING session). Samples are
 // buffered in PSRAM and flushed to the session's `_ppg.bin` in large blocks (one
 // per PPG window) to minimize SD write count/wear. Both are no-ops unless the

@@ -32,6 +32,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>   // abort()
 #include <time.h>
 
 static const char *TAG = "main";
@@ -161,9 +162,12 @@ static void active_poll(void)
 // -- TRACKING mode: one duty-cycle wake ------------------------------------
 // Every wake samples the accelerometer; every POWER_PPG_PERIOD_S it also runs a
 // PPG capture window. sleep_core_service() closes any elapsed 30 s epochs. The
-// trailing long vTaskDelay lets the FreeRTOS tickless idle drop the CPU into
-// automatic light sleep until the next boundary (on battery — the USB console
-// holds a no-sleep lock, so a bench run over USB validates cadence, not power).
+// trailing vTaskDelay only paces the epoch cadence — it does NOT light-sleep: the
+// CPU stays at the ACTIVE power profile (full speed, light_sleep_enable=false) all
+// night, because keeping the QSPI panel + LVGL/touch live for the on-screen Stop
+// button ruled out DFS/automatic light sleep (it glitched the panel back on).
+// Blanking the panel is the only TRACKING power saving; deep CPU sleep is deferred
+// (see components/power).
 static void tracking_wake(int wake_count)
 {
     const int64_t t0 = esp_timer_get_time();
@@ -359,11 +363,17 @@ void app_main(void)
     board_sdcard_mount();                // night logs (no-op-safe if no card)
     sleep_core_init();                   // epoch assembler / session state machine
     sd_logger_init();                    // register crash-safe SD persistence hooks
+    sd_logger_set_ppg_rate(HRV_RATE_HZ); // recording always runs at the tracking rate
     power_init();                        // UI gate + ACTIVE power profile
     bodynet_init();                      // BLE central for WT9011DCL body sensors + H10
     sync_init();                         // BLE/MQTT — stretch, no-op for now
 
-    // UI on core 0, sensing pinned to core 1.
-    xTaskCreatePinnedToCore(ui_task,     "ui",     6144, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(sensor_task, "sensor", 8192, NULL, 6, NULL, 1);
+    // UI on core 0, sensing pinned to core 1. A failed create here (boot-time OOM)
+    // would otherwise leave a dead display or a sensor-less device with no clue why.
+    BaseType_t ok_ui = xTaskCreatePinnedToCore(ui_task,     "ui",     6144, NULL, 5, NULL, 0);
+    BaseType_t ok_se = xTaskCreatePinnedToCore(sensor_task, "sensor", 8192, NULL, 6, NULL, 1);
+    if (ok_ui != pdPASS || ok_se != pdPASS) {
+        ESP_LOGE(TAG, "task create failed (ui=%d sensor=%d) — halting", (int)ok_ui, (int)ok_se);
+        abort();
+    }
 }

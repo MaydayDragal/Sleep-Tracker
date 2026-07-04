@@ -102,12 +102,27 @@ esp_err_t max30102_read_fifo(max30102_sample_t *out, size_t max, size_t *out_cou
         return ESP_ERR_INVALID_STATE;
     }
 
-    uint8_t wr_ptr = 0, rd_ptr = 0;
+    uint8_t wr_ptr = 0, rd_ptr = 0, ovf = 0;
     if (rd(REG_FIFO_WR_PTR, &wr_ptr, 1) != ESP_OK ||
+        rd(REG_OVF_COUNTER, &ovf,    1) != ESP_OK ||
         rd(REG_FIFO_RD_PTR, &rd_ptr, 1) != ESP_OK) {
         return ESP_FAIL;
     }
     int avail = ((int)wr_ptr - (int)rd_ptr) & (FIFO_DEPTH - 1);
+    // wr==rd is ambiguous on the 5-bit pointers: it means empty OR exactly full
+    // (32 samples). With FIFO rollover enabled, a full FIFO that has overwritten a
+    // sample bumps OVF_COUNTER, so a nonzero counter disambiguates "full" from
+    // "empty" — without this a whole 32-sample window (~80 ms @ 400 Hz) is misread
+    // as empty and silently dropped when a poll slips past the fill time.
+    if (avail == 0 && ovf > 0) {
+        avail = FIFO_DEPTH;
+        ESP_LOGW(TAG, "FIFO overflow (>=%u samples lost) — reading full FIFO", (unsigned)ovf);
+        // Clear the counter now that we've accounted for it, so a later genuinely-
+        // empty poll (wr==rd, ovf stale) can't be misread as full and read garbage.
+        // (The MAX3010x may also auto-clear it on the FIFO_DATA read below; writing 0
+        // is idempotent — the driver already zeroes this register at init/rate-change.)
+        wr(REG_OVF_COUNTER, 0x00);
+    }
     if (avail <= 0) {
         return ESP_OK;
     }

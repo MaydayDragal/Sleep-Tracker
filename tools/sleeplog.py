@@ -43,7 +43,10 @@ POSITIONS = {0: "unknown", 1: "back", 2: "left", 3: "right", 4: "belly", 5: "upr
 # Positions counted as "in bed / lying" for position breakdowns.
 LYING_POSITIONS = {1, 2, 3, 4}
 
-CARDIAC_COLS = ["hr_mean", "hr_min", "hr_max", "rmssd_ms", "spo2_pct", "beat_accept"]
+# Columns meaningless when NO_CARDIAC is set (PPG off / no signal) — nulled by
+# load_epochs. sqi is a cardiac-quality proxy, so it belongs here too (the
+# firmware writes 0 for it on NO_CARDIAC epochs).
+CARDIAC_COLS = ["hr_mean", "hr_min", "hr_max", "rmssd_ms", "spo2_pct", "sqi", "beat_accept"]
 
 
 def decode_flags(flags: int) -> str:

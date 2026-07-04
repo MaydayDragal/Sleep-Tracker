@@ -122,6 +122,8 @@
   .wf .lastnight .meta span{display:block;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
   .wf .vit{margin-top:18px;display:flex;gap:26px;color:var(--ink-2);font-size:14px}
   .wf .vit b{color:var(--ink);font-weight:600}
+  .wf .wf-batt{position:absolute;top:32px;right:26px;display:flex;align-items:center;gap:6px;
+    font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
   .wf .startbtn{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
     font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;
     background:var(--accent);border:none;border-radius:22px;padding:11px 26px}
@@ -282,6 +284,7 @@
       <!-- 1. WATCH FACE -->
       <section class="scr on" data-scr="watch">
         <div class="body wf">
+          <span class="batt wf-batt"><span class="cell"><span class="fill"></span></span>82%</span>
           <svg class="moon" width="30" height="30" viewBox="0 0 30 30" fill="none">
             <path d="M21 22A9 9 0 0 1 12 7a9 9 0 1 0 9 15Z" fill="#7B74F0" opacity=".85"/>
           </svg>
@@ -312,10 +315,8 @@
             <div class="tile"><div class="k">HRV · rmssd</div><div class="v num">48<span class="unit"> ms</span></div></div>
           </div>
           <div class="sqi">
-            <span>Signal quality</span>
-            <span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>
-            <span style="color:var(--good)">Good</span>
-            <span class="chip" style="margin-left:auto"><span class="d" style="background:var(--good)"></span>Wrist contact</span>
+            <span>Signal</span>
+            <span style="color:var(--good)">sqi 78%</span>
           </div>
         </div>
       </section>
@@ -383,12 +384,12 @@
           <span class="batt"><span class="cell"><span class="fill"></span></span>82%</span></div>
         <div class="body">
           <div class="card" style="position:relative">
-            <div class="caption"><span class="t" style="color:var(--hr)">Heart rate</span><span class="s">avg 56 · min 49 · max 71 bpm</span></div>
+            <div class="caption"><span class="t" style="color:var(--hr)">Heart rate</span><span class="s">avg 56 · min 49 bpm</span></div>
             <div id="hrChart"></div>
             <div class="tip" id="hrTip"></div>
           </div>
           <div class="card" style="position:relative;margin-top:12px">
-            <div class="caption"><span class="t" style="color:var(--spo2)">Blood oxygen</span><span class="s">avg 96% · min 89% · 2 dips</span></div>
+            <div class="caption"><span class="t" style="color:var(--spo2)">Blood oxygen</span><span class="s">avg 96% · 2 dips</span></div>
             <div id="spo2Chart"></div>
             <div class="tip" id="spo2Tip"></div>
           </div>
@@ -448,7 +449,6 @@
             <div class="arow"><div class="k">Smart window<small>wake at lightest sleep, 06:15–06:45</small></div><span class="tog on"><i></i></span></div>
             <div class="arow"><div class="k">Gradual wake<small>screen brightens, tones escalate</small></div><span class="tog on"><i></i></span></div>
             <div class="arow"><div class="k">Sound<small>through the ES8311 speaker</small></div><span class="v">Dawn</span></div>
-            <div class="arow"><div class="k">Vibration<small>needs haptic motor (expansion)</small></div><span class="tog"><i></i></span></div>
           </div>
         </div>
       </section>

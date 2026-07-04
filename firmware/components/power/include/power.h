@@ -37,8 +37,9 @@ esp_err_t power_init(void);
 void power_enter_tracking(void);
 void power_exit_tracking(void);
 
-// Called at the top of the UI task loop; blocks while TRACKING so the UI task
-// stops waking (letting tickless idle engage), returns immediately in ACTIVE.
+// Called at the top of the UI task loop; blocks while TRACKING so the redundant UI
+// task stops waking every frame (LVGL/touch still run on the esp_lvgl_port task),
+// returns immediately in ACTIVE.
 void power_ui_gate_wait(void);
 
 bool power_is_tracking(void);
