@@ -3,6 +3,7 @@ build/
 sdkconfig
 sdkconfig.old
 sdkconfig.esp32s3-amoled
+sdkconfig.esp32s3-ppg-sweep
 managed_components/
 dependencies.lock
 *.pyc
