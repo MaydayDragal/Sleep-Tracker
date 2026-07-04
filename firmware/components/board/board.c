@@ -138,14 +138,18 @@ esp_err_t board_display_start(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle     = io,
         .panel_handle  = panel,
-        .buffer_size   = BSP_LCD_H_RES * 100,   // partial buffer, in PSRAM
+        // Partial buffers in INTERNAL DMA-capable RAM (not PSRAM): the flush DMAs
+        // the draw buffer to the CO5300 over QSPI, and PSRAM+QSPI DMA intermittently
+        // stalls (the trans-done never fires -> LVGL wait_for_flushing hangs forever
+        // -> the display/touch task freezes). 40 lines x double-buffer ~= 58 KB.
+        .buffer_size   = BSP_LCD_H_RES * 40,
         .double_buffer = true,
         .hres          = BSP_LCD_H_RES,
         .vres          = BSP_LCD_V_RES,
         .monochrome    = false,
         .color_format  = LV_COLOR_FORMAT_RGB565,
         .rotation      = { .swap_xy = false, .mirror_x = false, .mirror_y = false },
-        .flags         = { .buff_dma = false, .buff_spiram = true, .swap_bytes = true },
+        .flags         = { .buff_dma = true, .buff_spiram = false, .swap_bytes = true },
     };
     lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
     if (disp == NULL) {
