@@ -27,7 +27,7 @@ static const char *TAG = "sd_logger";
 
 static const char *CSV_HEADER =
     "seq,t_unix,activity,body_position,body_activity,hr_mean,hr_min,hr_max,"
-    "rmssd_ms,spo2_pct,sqi,batt_pct,beat_accept,flags\n";
+    "rmssd_ms,spo2_pct,sqi,batt_pct,vbat_mv,beat_accept,flags\n";
 
 static FILE    *s_epoch_f;
 static FILE    *s_event_f;
@@ -277,12 +277,13 @@ static void hk_append(const sleep_epoch_t *ep)
     }
 
     int rc = fprintf(s_epoch_f,
-        "%lu,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+        "%lu,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
         (unsigned long)s_seq, (unsigned long)ep->t_unix,
         (unsigned)ep->activity, (unsigned)ep->body_position, (unsigned)ep->body_activity,
         (unsigned)ep->hr_mean, (unsigned)ep->hr_min, (unsigned)ep->hr_max,
         (unsigned)ep->rmssd_ms, (unsigned)ep->spo2_pct, (unsigned)ep->sqi,
-        (unsigned)ep->batt_pct, (unsigned)ep->beat_accept, (unsigned)ep->flags);
+        (unsigned)ep->batt_pct, (unsigned)ep->vbat_mv, (unsigned)ep->beat_accept,
+        (unsigned)ep->flags);
 
     if (rc < 0 || ferror(s_epoch_f)) {
         ESP_LOGW(TAG, "epoch write error — dropping card, will remount+reopen");

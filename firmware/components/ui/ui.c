@@ -915,6 +915,20 @@ esp_err_t ui_init(void)
     return ESP_OK;
 }
 
+// "HH:MM:SS" (24h) -> "h:MM AM/PM" for the on-screen clocks. Falls back to
+// "--:--" if the source isn't a parseable time (e.g. the RTC placeholder).
+static void fmt_clock_12h(const char *src, char *out, size_t n)
+{
+    int hh = 0, mm = 0;
+    if (src && sscanf(src, "%d:%d", &hh, &mm) == 2 && hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
+        int h12 = hh % 12;
+        if (h12 == 0) h12 = 12;
+        snprintf(out, n, "%d:%02d %s", h12, mm, hh < 12 ? "AM" : "PM");
+    } else {
+        snprintf(out, n, "--:--");
+    }
+}
+
 void ui_set_status(const ui_status_t *s)
 {
     if (s == NULL || s_wf_time == NULL) {
@@ -924,14 +938,11 @@ void ui_set_status(const ui_status_t *s)
         return;
     }
 
-    // HH:MM from the "HH:MM:SS" string
-    char hhmm[6] = "--:--";
-    if (s->time_str && strlen(s->time_str) >= 5) {
-        memcpy(hhmm, s->time_str, 5);
-        hhmm[5] = '\0';
-    }
-    lv_label_set_text(s_wf_time, hhmm);
-    lv_label_set_text(s_trk_time, hhmm);
+    // 12-hour clock (e.g. "10:32 PM") for the watch face + tracking tile.
+    char clock12[12];
+    fmt_clock_12h(s->time_str, clock12, sizeof clock12);
+    lv_label_set_text(s_wf_time, clock12);
+    lv_label_set_text(s_trk_time, clock12);
     if (s->date_str) lv_label_set_text(s_wf_date, s->date_str);
 
     char buf[40];

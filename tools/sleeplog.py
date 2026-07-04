@@ -13,7 +13,7 @@ import sys
 COLUMNS = [
     "seq", "t_unix", "activity", "body_position", "body_activity",
     "hr_mean", "hr_min", "hr_max", "rmssd_ms", "spo2_pct", "sqi",
-    "batt_pct", "beat_accept", "flags",
+    "batt_pct", "vbat_mv", "beat_accept", "flags",
 ]
 
 EPOCH_SECONDS = 30

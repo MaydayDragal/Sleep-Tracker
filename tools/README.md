@@ -26,7 +26,7 @@ py -m pip install pyserial numpy scipy neurokit2
 
 | File | What it does |
 |---|---|
-| `sleeplog.py` | Shared schema: the 14-column CSV layout, flag bits, position enum, and a robust loader. Single source of truth mirroring `sd_logger.c` + `sleep_core.h`. |
+| `sleeplog.py` | Shared schema: the 15-column CSV layout, flag bits, position enum, and a robust loader. Single source of truth mirroring `sd_logger.c` + `sleep_core.h`. |
 | `read_night.py` | Quick validator/summariser — "does the log open cleanly?" (the Phase-2 exit-gate check). Tolerates a torn final line from a mid-append power cut. |
 | `read_raw_ppg.py` | Parses the raw-PPG binary side-file (`*_ppg.bin`) the firmware writes per recording — one block per PPG window, buffered in PSRAM then flushed to SD to spare card wear. Summarises blocks/samples; `--csv` dumps `t_unix,red,ir`. Skips a torn trailing block from a mid-flush power cut. |
 | `gen_synthetic_night.py` | Generates a realistic night in the exact firmware schema; `--truth` emits the **ground-truth hypnogram** and `--hrv` populates the optional RMSSD/HRV_VALID columns, so the scorer's accuracy is measurable without a real overnight run. |

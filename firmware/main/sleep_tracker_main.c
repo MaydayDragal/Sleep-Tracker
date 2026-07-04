@@ -28,6 +28,7 @@
 #include "power.h"
 #include "ui.h"
 #include "sync.h"
+#include "nettime.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -141,9 +142,9 @@ static void active_poll(void)
         }
 
         if ((echo++ % 10) == 0) {   // ~every 5 s
-            ESP_LOGI(TAG, "readout: t=%s rate=%uHz hr=%d spo2=%d hrv=%dms finger=%d sqi=%.2f%s batt=%d%% %s",
+            ESP_LOGI(TAG, "readout: t=%s rate=%uHz hr=%d spo2=%d hrv=%dms finger=%d sqi=%.2f%s batt=%d%%/%dmV %s",
                      timebuf, (unsigned)s_ppg_rate, st.hr_bpm, st.spo2, st.hrv_ms,
-                     st.finger, v.sqi, v.valid ? "" : " (untrusted)", st.batt_pct,
+                     st.finger, v.sqi, v.valid ? "" : " (untrusted)", st.batt_pct, st.vbat_mv,
                      st.charging ? "CHG" : (st.vbus ? "USB" : "BAT"));
         }
 
@@ -246,7 +247,13 @@ static void sensor_task(void *arg)
     pmu_init(bus);
     ppg_reset();
 
-    // Seed the RTC if it powered up unset, so timestamps are sane.
+    // Fetch the time over NTP (brief WiFi, then off) and write it to the RTC. No-op
+    // if no wifi_config.h / SSID is set, or if WiFi/NTP is unreachable — in which
+    // case the seed fallback below applies. Runs before the seed check so a good
+    // NTP time always wins over the fixed fallback date.
+    nettime_sync();
+
+    // Seed the RTC if it (still) powered up unset, so timestamps are sane.
     pcf85063_datetime_t seed_check;
     if (pcf85063_get(&seed_check) != ESP_OK || !pcf85063_time_valid(&seed_check)) {
         const pcf85063_datetime_t seed = {

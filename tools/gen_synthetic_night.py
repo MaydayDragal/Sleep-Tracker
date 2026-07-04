@@ -141,8 +141,9 @@ def gen(args) -> list[dict]:
         if motion:
             flags |= S.FLAG_MOTION
 
-        # --- battery: linear-ish drain, ~4 %/h ---
+        # --- battery: linear-ish drain, ~4 %/h; voltage maps a Li-Po 3.3-4.2 V ---
         batt = max(0, round(100 - (i / n) * args.hours * 4.0))
+        vbat_mv = round(3300 + batt / 100.0 * 900)
 
         if args.no_position:
             position_out = 0
@@ -158,7 +159,7 @@ def gen(args) -> list[dict]:
             "body_activity": min(65535, body_activity),
             "hr_mean": hr_mean, "hr_min": hr_min, "hr_max": hr_max,
             "rmssd_ms": rmssd, "spo2_pct": spo2, "sqi": sqi,
-            "batt_pct": batt, "beat_accept": beat_accept, "flags": flags,
+            "batt_pct": batt, "vbat_mv": vbat_mv, "beat_accept": beat_accept, "flags": flags,
         })
     return rows, [TRUE_STAGE[s] for s in stages]
 

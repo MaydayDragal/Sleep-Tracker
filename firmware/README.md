@@ -63,16 +63,21 @@ firmware/
     ├── ppg/                  # despike + band-pass, beat detect, IBI/HR/SpO2/SQI, live RMSSD          [phase1]
     ├── actigraphy/           # QMI8658 wrist activity counts (accel-only)                             [phase1]
     ├── rtc/                  # PCF85063A real-time clock driver                                       [phase0/1]
-    ├── pmu/                  # AXP2101 PMU: VBUS / charge state / battery %                            [phase0/1]
+    ├── pmu/                  # AXP2101 PMU: VBUS / charge state / battery % + voltage                  [phase0/1]
     ├── power/                # ACTIVE/TRACKING: panel off + UI-gate (CPU full-speed; deep sleep deferred) [phase2]
     ├── sleep_core/           # epoch assembler + session FSM + per-epoch RMSSD (scoring = TODO phase3) [phase2/3]
-    ├── sd_logger/            # crash-safe 14-column CSV epoch logger                                  [phase2]
+    ├── sd_logger/            # crash-safe 15-col CSV logger + PSRAM-buffered raw-PPG side-file         [phase2]
+    ├── nettime/              # transient WiFi + SNTP → set RTC at boot, then WiFi off                 [phase2]
     ├── bodynet/              # BLE central: WT9011DCL body sensors + H10 — STUB                       [phase2.5]
     ├── ui/                   # LVGL watch UI: 11-tile swipeable app                                   [phase0/4]
     └── sync/                 # BLE GATT log-pull → MQTT to HA + CPAP — STUB                           [phase5]
 ```
 
 > **Why `board/` doesn't use the vendor `bsp_display_start()`:** the managed Waveshare BSP (v2.0.3) never releases the FT3168 touch reset via the TCA9554 IO-expander (both `LCD_RST` and `TOUCH_RST` are `NC`), so touch is mute at `0x38` and the vendor `bsp_display_start()` `ESP_ERROR_CHECK`s touch init → panic loop. `board_display_start()` instead: (1) pulses TCA9554 pins `EXIO0–2` low→high to release the LCD/touch resets (matching Waveshare's own FT3168 example), (2) brings up the CO5300 + LVGL directly via `bsp_display_new()` + `esp_lvgl_port`, and (3) adds touch **non-fatally** (a probe miss degrades to display-only instead of a boot loop). Result: display **and** touch work.
+
+## Time / NTP (optional)
+
+The RTC is set at boot from an NTP server if WiFi is configured, then WiFi is turned back off (it is not kept running). To enable it, copy [`components/nettime/wifi_config.example.h`](components/nettime/wifi_config.example.h) → `components/nettime/wifi_config.h` (gitignored) and fill in your **2.4 GHz** SSID/password and `SLEEPTRK_UTC_OFFSET_MIN` (local = UTC + minutes). Without that file NTP is skipped and the RTC keeps its battery-backed time (or the built-in seed date on a cold start). The clock is a naive wall clock (`tz_offset_min=0` in the log header), so the UTC offset just makes the watch face show local time.
 
 ## Board abstraction (S3 ↔ C6)
 
